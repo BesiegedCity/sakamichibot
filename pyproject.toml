@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "sakamichibot"
+version = "0.4.1"
+description = "A QQ bot based on Nonebot2, offering Quiz Function about Nogizaka and helper tools of subtitle group."
+authors = ["namiya233 <hfweicheng@outlook.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+nb-cli = "^0.5.0"
+nonebot-adapter-cqhttp = "^2.0.0-alpha.16"
+nonebot-plugin-apscheduler = "^0.1.2"
+mysql-connector-python = "^8.0.26"
+zhconv = "^1.4.2"
+bilibili-api = "^8.3.1"
+pillow = "^8.4"
+pydantic = {extras = ["email"], version = "^1.8"}
+
+[tool.poetry.dev-dependencies]
+
+[nonebot.plugins]
+plugins = []
+plugin_dirs = ["src/plugins"]
+
+[[tool.poetry.source]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
