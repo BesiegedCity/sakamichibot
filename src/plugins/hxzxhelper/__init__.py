@@ -213,7 +213,7 @@ async def canceltask(bot: Bot, event: GroupMessageEvent):
         except IndexError:
             await cancel_task.finish("没有在处理和发送队列中找到对应mail")
         except apscheduler.jobstores.base.JobLookupError:
-            await cancel_task.finish(f"mail[{index}]：尚未进入发送队列，已从处理队列中移出")
+            await cancel_task.finish(f"mail[{arg}]：尚未进入发送队列，已从处理队列中移出")
     else:
         await cancel_task.finish("请提供取消发送的mail数字序号")
 
@@ -300,10 +300,10 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
         # await load_trans.finish("没有在队列中找到与时间相匹配的mail")
         await load_mail.finish()
     if maillist[targetmail].translation != "":
-        logger.info(f"mail[{targetmail}]：翻译已覆盖")
-        await load_trans.send(f"mail[{targetmail}]：翻译已覆盖")
+        logger.info(f"mail[{maillist[targetmail].no}]：翻译已覆盖")
+        await load_trans.send(f"mail[{maillist[targetmail].no}]：翻译已覆盖")
     maillist[targetmail].translation = raw_msg
-    logger.info(f"mail[{targetmail}]：翻译已收集")
+    logger.info(f"mail[{maillist[targetmail].no}]：翻译已收集")
     # await load_trans.send(f"mail[{targetmail}]：翻译已收集")
     if maillist[targetmail].stat == 1:
         maillist[targetmail].stat = 3
