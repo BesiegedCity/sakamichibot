@@ -54,14 +54,16 @@ help_userinfo = MessageSegment.text("☆查询个人信息：“我的正确率�
 user_skip = on_command("我想跳过", aliases={"我要跳过"}, priority=7)
 help_skip = MessageSegment.text("☆设置不太想抽到的题目：“我想跳过 [类型1] [类型2]...”，"
                                 f"在随机抽取题目时有较高的概率跳过指定类型，此设置仅对个人生效。")
-test = on_command("测试", priority=1)
 
 
-@test.handle()
-async def _test(bot: Bot, event: GroupMessageEvent, state: T_State):
-    ret = await bot.get_group_member_list(group_id=704330311, no_cache=True)  # 返回JSON数组
-    logger.debug(repr(ret))
-    await test.finish()
+# test = on_command("测试", priority=1)
+#
+#
+# @test.handle()
+# async def _test(bot: Bot, event: GroupMessageEvent, state: T_State):
+#     ret = await bot.get_group_member_list(group_id=704330311, no_cache=True)  # 返回JSON数组
+#     logger.debug(repr(ret))
+#     await test.finish()
 
 
 @qna_start.handle()

@@ -1,5 +1,6 @@
 import datetime
 import poplib
+import re
 from email.header import decode_header
 from email.message import Message
 from email.parser import BytesParser
@@ -29,19 +30,47 @@ BEARER_TOKEN = plugin_config.twi_bearer_token
 TWI_HEADERS = plugin_config.twi_headers
 
 
+async def get_advanced(url: str, params=None, headers=None, proxies=None) -> Union[None, httpx.Response]:
+    """
+        对异步 httpx.get() 方法进行再封装，加入了自动重试和错误捕获。
+
+    :param url:
+    :param params:
+    :param headers:
+    :param proxies:
+    :return: None or httpx.Response object
+    """
+    retry = 5
+    async with AsyncClient(proxies=proxies, headers=headers) as client:
+        while retry:
+            retry = retry - 1
+            try:
+                ret = await client.get(url, params=params)
+                if ret.status_code != httpx.codes.OK:
+                    raise httpx.HTTPStatusError
+                return ret
+            except httpx.HTTPStatusError:
+                logger.warning(f"服务器状态码错误：{ret.status_code}")
+            except httpx.ConnectTimeout:
+                logger.warning("服务器连接超时")
+            except httpx.ReadTimeout:
+                logger.warning("服务器读取超时")
+            except httpx.ProxyError:
+                logger.warning("代理服务器出错")
+            except httpx.RequestError:
+                logger.exception("网络错误")
+        else:
+            logger.error("所有Get尝试均失败，返回None")
+            return None
+
+
 async def get_latest_blog():
-    try:
-        async with AsyncClient() as client:
-            ret = await client.get(f"https://blog.nogizaka46.com/{plugin_config.member_abbr}/atom.xml")
+    ret = await get_advanced(f"https://blog.nogizaka46.com/{plugin_config.member_abbr}/atom.xml")
+    if ret:
         tree = etree.XML(ret.content)
         return tree
-    except httpx.ReadTimeout:
-        logger.error("服务器读取超时")
-    except httpx.ConnectTimeout:
-        logger.error("服务器连接超时")
-    except httpx.RequestError:
-        logger.exception("下载博客错误")
-    raise ValueError("下载到的博客内容为空")
+    else:
+        raise ValueError("下载到的博客内容为空")
 
 
 def parse_blog(tree):
@@ -50,39 +79,28 @@ def parse_blog(tree):
     imgcnt = 1
 
     date = tree.xpath('//ns:entry[1]/ns:published/text()', namespaces=ns)[0]
-    text = f"日期：{date[:10]}\n"
-
     title = tree.xpath('//ns:entry[1]/ns:title/text()', namespaces=ns)[0]
-    text += f"标题：{title}\n"
-
     entry1 = tree.xpath('//ns:entry[1]/ns:content/text()', namespaces=ns)[0]  # XPath中列表下标从1开始
+
+    text = f"日期：{date[:10]}\n" \
+           f"标题：{title}\n"
+
     contenthtml = etree.HTML(entry1)
-    lines = contenthtml.xpath("/html/body/div/div[2]/*")
-    for line in lines:
-        if line.tag == 'p':
-            if line.xpath("./text()"):
-                text += line.xpath("./text()")[0]  # 有span的text就为None（即使既有span又有text）
-            for span in line.getchildren():
-                chds = span.getchildren()  # a
-                for chd in chds:  # 实际上放在span里面的只有tag为a的超链接
-                    if chd.text:
-                        if chd.get("href"):
-                            text += "【链接】"
-                        else:
-                            text += "【未知文字】"
-                        text += chd.text
-                if span.text:  # 莫名其妙被拆成几行span的一句话
-                    text += span.text
-        else:
-            if line.tag == 'div':
-                for div in line.getchildren():
-                    if div.tag == "div":
-                        img = div.getchildren()[0]
-                        if img.tag == "img":
-                            text += f"【第{imgcnt}张图片的位置】"
-                            images += MessageSegment.image(img.get("src"))
-                            imgcnt += 1
-        text += "\n"
+    text += "\n"
+    for element in contenthtml.iter():
+        if element.tag == "p" and text[-1] != "\n":
+            text += "\n"
+        if element.text:
+            text += element.text
+        if element.tail:
+            text += element.tail
+        if element.tag == "img":
+            text += f"【第{imgcnt}张图片的位置】"
+            images += MessageSegment.image(element.get("src"))
+            imgcnt += 1
+        if element.tag == "br":
+            text += "\n" if text[-1] == "\n" else "\n\n"
+    text = re.sub(r"^\s*", "", text).strip("\n")
     return [text, images]
 
 
@@ -119,33 +137,21 @@ async def blog_initial():
 
 
 async def get_latest_twi():
-    try:
-        async with AsyncClient(proxies=PROXIES, headers=TWI_HEADERS) as client:
-            ret = await client.get("https://api.twitter.com/2/users/{}/tweets".format(317684165),  # @nogizaka46
-                                   params=PARAMS)
-            if ret.status_code != httpx.codes.OK:
-                raise httpx.HTTPStatusError
-            ret = ret.json()
-            return ret
-    except httpx.HTTPStatusError:
-        logger.error(f"服务器状态码错误：{ret.status_code}")
-    except httpx.ReadTimeout:
-        logger.error("服务器读取超时")
-    except httpx.ProxyError:
-        logger.error("代理服务器出错")
-    except httpx.RequestError:
-        logger.exception("下载推文错误")
-    raise ValueError("下载到的推文内容为空")
+    ret = await get_advanced("https://api.twitter.com/2/users/{}/tweets".format(317684165),  # @nogizaka46
+                             params=PARAMS, proxies=PROXIES, headers=TWI_HEADERS)
+    if ret:
+        ret = ret.json()
+        return ret
+    else:
+        raise ValueError("下载到的推文内容为空")
 
 
 async def download_twi_img(url: str):
-    try:
-        async with AsyncClient(proxies=PROXIES) as client:
-            ret = await client.get(url)
-            ret = ret.content
-            return ret
-    except httpx.RequestError:
-        logger.error("下载推文图片失败")
+    ret = await get_advanced(url, proxies=PROXIES)
+    if ret:
+        ret = ret.content
+        return ret
+    else:
         raise ValueError("下载推文图片为空")
 
 
@@ -199,7 +205,7 @@ async def convert_twi2message(twi):
 
 def update_twi_time(js: dict) -> str:
     oldest_id = js["meta"]["oldest_id"]
-    logger.info(f"oldtwiset状态：{oldtwiset}")
+    logger.debug(f"oldtwiset状态：{oldtwiset}")
 
     for key in oldtwiset.copy():
         if key < oldest_id:
@@ -332,14 +338,12 @@ def get_latest_mail() -> Union[Tuple[None, None, None], Tuple[str, Tuple[Optiona
 async def download_mail_images(imgs_url: List) -> Tuple[bytes, ...]:
     images = []
     if imgs_url:
-        async with AsyncClient() as client:
-            for url in imgs_url:
-                try:
-                    img = await client.get(url)
-                    images.append(img.content)
-                except httpx.RequestError:
-                    logger.exception("下载mail配图错误：")
-                    raise ValueError("下载mail配图错误，mail更新失败")
+        for url in imgs_url:
+            img = await get_advanced(url)
+            if img:
+                images.append(img.content)
+            else:
+                raise ValueError("下载mail配图错误，mail更新失败")
         return tuple(images)
 
 

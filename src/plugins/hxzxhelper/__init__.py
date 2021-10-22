@@ -407,8 +407,9 @@ async def push_mail():
         logger.debug(f"当前mail时间戳：{mail.time}")
 
         await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=str(content).strip("\n"))
-        for image in images:
-            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=MessageSegment.image(image))
+        if images:
+            for image in images:
+                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=MessageSegment.image(image))
     else:
         logger.info(f"没有检查到Mail更新")
 

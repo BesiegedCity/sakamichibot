@@ -96,8 +96,9 @@ class Mail(object):
         height_top = top.size[1]
         height_bottom = bottom.size[1]
         d = ImageDraw.Draw(background)
-
-        imgs = [Image.open(BytesIO(img)) for img in self.images]
+        imgs = []
+        if self.images:
+            imgs = [Image.open(BytesIO(img)) for img in self.images]
         s = self.translation
 
         text_cr = ""
@@ -124,8 +125,8 @@ class Mail(object):
         if imgs:
             if len(imgs) == 1:
                 sidelen = width - 30 * 2
-                imgs[0].thumbnail((sidelen, sidelen))
                 height_pic = imgs[0].size[1]
+                imgs[0].thumbnail((sidelen, height_pic))
                 pic_ground = Image.new("RGB", size=(width, height_pic), color=(255, 255, 255))
                 pic_ground.paste(imgs[0], box=(30, 0))
             else:
