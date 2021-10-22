@@ -1,4 +1,4 @@
-sakamichibot
+Sakamichibot：用于坂道问答和字幕组辅助工具的QQ机器人，基于Nonebot2开发。
 
 ## How to start
 
