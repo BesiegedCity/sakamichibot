@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND noninteractive
 
 RUN python3 -m pip install poetry && poetry config virtualenvs.create false
 
-COPY ./pyproject.toml ./poetry.lock /
+COPY ./pyproject.toml /
 RUN poetry install
 
 WORKDIR /bot

@@ -23,10 +23,10 @@ emoji = "^1.6.1"
 plugins = []
 plugin_dirs = ["src/plugins"]
 
-[[tool.poetry.source]]
-name = "tuna"
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-secondary = true
+# [[tool.poetry.source]]
+# name = "tuna"
+# url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# default = true
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
