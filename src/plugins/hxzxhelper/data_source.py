@@ -5,9 +5,9 @@ import nonebot
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
 
 from .config import Config
-from .lib.blog import check_blog_update, get_blog_f
-from .lib.mail import check_mail_update
-from .lib.twitter import check_tweet_update, get_tweets_f
+from .lib.blog import check_blog_update, get_blog_f, blog_initial
+from .lib.mail import check_mail_update, mail_initial
+from .lib.twitter import check_tweet_update, get_tweets_f, tweet_initial
 from .lib.utils import get_advanced
 from .model import ParsedObject, Mail
 
