@@ -1,10 +1,13 @@
-from io import BytesIO
+from io import BytesIO, BufferedIOBase
 from math import ceil
-from typing import List
+from typing import List, Optional, Union
 
+import emoji
 import nonebot
 from PIL import Image, ImageFont, ImageDraw
 from nonebot.adapters.cqhttp.message import MessageSegment
+from nonebot.log import logger
+from pydantic import BaseModel
 
 from .config import Config
 
@@ -34,7 +37,7 @@ def square_n_thumb(imglist: list, sidelength: int) -> list:
 class Mail(object):
     no: int
     raw_text: str
-    images: List[bytes]
+    images: Union[List[bytes], List[BufferedIOBase]]
     translation: str
     time: int
 
@@ -92,6 +95,7 @@ class Mail(object):
         bottom = Image.open("./imgsrc/bottom.jpg")
         background = Image.open("./imgsrc/background.jpg")
         fnt = ImageFont.truetype("./imgsrc/font.otf", 45)
+        fnt_emoji = ImageFont.truetype("./imgsrc/font_emoji.ttf", 109, layout_engine=ImageFont.LAYOUT_RAQM)
         width = background.size[0]
         height_top = top.size[1]
         height_bottom = bottom.size[1]
@@ -101,32 +105,66 @@ class Mail(object):
             imgs = [Image.open(BytesIO(img)) for img in self.images]
         s = self.translation
 
-        text_cr = ""
-        text_cnt = 0
-        for char in list(s.replace("\r\n", "\n")):
+        def emoji_repl(symbol, meta):
+            return symbol
+
+        s = emoji.replace_emoji(s, emoji_repl)
+
+        text_edited = ""
+        text_tmp = ""
+        for char in list(s.replace("\r\n", "\n").replace("　", "")):
+            text_tmp += char
             if char == "\n":
-                text_cnt = 0
+                text_edited += text_tmp
+                text_size = 0
+                text_tmp = ""
             else:
-                text_cnt = text_cnt + 1
-            if text_cnt > 20:  # 一行最多21个汉字（不包含任何符号）
-                text_cr = text_cr + "\n"
-                text_cnt = 0
-            text_cr = text_cr + char
-        height_headline = d.textsize(plugin_config.dynamic_topic, font=fnt)[1]  # 设置首行话题的高度
-        height_text = height_headline + 25 + d.multiline_textsize(text_cr, font=fnt, spacing=30)[1] + 60  # 预留60像素
+                text_size = d.textsize(text_tmp, font=fnt)[0]
+            if text_size > width - 30 * 4:
+                text_edited += text_tmp + "\n"
+                text_size = 0
+                text_tmp = ""
+        if text_tmp != "":
+            text_edited += text_tmp
+
+        font_height = d.textsize(plugin_config.dynamic_topic, font=fnt)[1]  # 设置首行话题的高度
+        height_text = (font_height + 30) * (1 + len(text_edited.split("\n")))
+        logger.debug(f"预设文字高度：{height_text}")
         text_ground = Image.new("RGB", size=(width, height_text), color=(255, 255, 255))
         d = ImageDraw.Draw(text_ground)
         d.text((30, 0), plugin_config.dynamic_topic, font=fnt, fill=(17, 136, 178))  # 行距30，左边距30
-        d.multiline_text((30, height_headline + 25), text_cr, spacing=30, font=fnt,
-                         fill=(0, 0, 0))  # 计算下一行开始的时候要考虑行距+字高
+
+        width_offset, height_offset = (30, font_height + 25)
+        r = emoji.get_emoji_regexp()
+        for line in text_edited.split("\n"):
+            if not line:
+                height_offset += font_height + 30
+                width_offset = 30
+                continue
+            line_split_emj = r.split(line)
+            for text in line_split_emj:
+                if not emoji.is_emoji(text):
+                    d.text((width_offset, height_offset), text, font=fnt, fill=(0, 0, 0))
+                    width_offset += int(fnt.getlength(text))
+                else:
+                    t = Image.new("RGB", size=(150, 150), color=(255, 255, 255))  # FreeType 不可以直接设定尺寸，只能手动缩放
+                    td = ImageDraw.Draw(t)
+                    td.text((0, 20), text, font=fnt_emoji, fill=(0, 0, 0), embedded_color=True)
+                    t = t.resize((60, 60))
+                    text_ground.paste(t, (width_offset, height_offset))
+                    width_offset += 55
+            height_offset += font_height + 30
+            width_offset = 30
+        logger.debug(f"最终文字高度：{height_offset}")
 
         height_pic = background.size[1]
         pic_ground = background.copy()  # 没有图片的时候只粘贴一段默认空白背景
         if imgs:
             if len(imgs) == 1:
                 sidelen = width - 30 * 2
+                rate = sidelen / imgs[0].size[0]
+                imgs[0] = imgs[0].resize((int(rate * imgs[0].size[0]), int(rate * imgs[0].size[1])))
                 height_pic = imgs[0].size[1]
-                imgs[0].thumbnail((sidelen, height_pic))
                 pic_ground = Image.new("RGB", size=(width, height_pic), color=(255, 255, 255))
                 pic_ground.paste(imgs[0], box=(30, 0))
             else:
@@ -182,3 +220,9 @@ class Mail(object):
             # msg = "【发送预览】\n#贺喜遥香#\n" + self.message() + notes2
             msg = "【发送预览】\n-检查翻译错误/图片缺失情况-\n" + MessageSegment.image(self.imgcreate()) + notes2
         return msg
+
+
+class ParsedObject(BaseModel):
+    text: str
+    images_url: List[str]
+    timestamp: Optional[str]

@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import re
 from io import BytesIO
-from typing import List, Union
+from typing import List, Optional
 
 import apscheduler.jobstores.base
 import nonebot
@@ -20,9 +20,9 @@ from nonebot.rule import Rule
 from nonebot.typing import T_State
 
 from .config import Config
-from .data_source import check_if_blog_update, convert_blog2message, blog_initial, get_latest_blog
-from .data_source import check_if_mail_update, mail_initial
-from .data_source import check_if_twi_update, convert_twi2message, twi_initial, get_latest_twi
+from .data_source import blog_initial, get_blog_update, get_blog_manually
+from .data_source import mail_initial, get_mail_update
+from .data_source import tweet_initial, get_tweet_update, get_tweet_manually
 from .model import Mail
 
 global_config = nonebot.get_driver().config
@@ -33,13 +33,13 @@ ADMINGROUPS = plugin_config.fansub_groups
 TIME_WAITBEFORESEND = plugin_config.time_waitbeforesend
 TIME_WAITFORIMAGES = plugin_config.time_waitforimages
 TIME_CHECKBLOGUPDATE = plugin_config.time_checkblogupdate
-TIME_CHECKTWIUPDATE = plugin_config.time_checktwiupdate
+TIME_CHECKTWIUPDATE = plugin_config.time_checktweetupdate
 TIME_CHECKMAILUPDATE = plugin_config.time_checkmailupdate
 
 maillist: List[Mail] = []
 imagelist: List[BytesIO] = []
-mail_loadingimg: Union[Mail, None] = None
-cred = plugin_config.cred
+mail_loadingimg: Optional[Mail] = None
+cred = plugin_config.bili_cred
 push_group = 0
 scheduler = nonebot.require("nonebot_plugin_apscheduler").scheduler
 driver = get_driver()
@@ -55,7 +55,7 @@ async def initial():  # 初始化必须成功，否则第一次获取博客和�
         logger.info("当前处于生产环境")
         push_group = 1
 
-    await asyncio.gather(blog_initial(), twi_initial(), mail_initial())
+    await asyncio.gather(blog_initial(), tweet_initial(), mail_initial())
     logger.info("博客、推特、Mail更新组件初始化完毕")
 
 
@@ -153,7 +153,7 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
     bot = nonebot.get_bot(str(event.self_id))
     rsps = {}
     mailindex = maillist.index(mail)
-    logger.info(f"正在发送b站动态，序号：{mail.no}，文字内容：{mail.translation}")
+    logger.info(f"正在发送b站动态，序号：{mail.no}，文字内容：{repr(mail.translation)}")
     try:
         sendrsps = await dynamic.send_dynamic(f"{plugin_config.dynamic_topic}\n" + mail.translation,
                                               image_streams=mail.images,
@@ -230,27 +230,28 @@ async def loadimg(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def loadimg_finish(event: GroupMessageEvent):
     global mail_loadingimg, imagelist
     bot = nonebot.get_bot(str(event.self_id))
-    index = maillist.index(mail_loadingimg)
-    for img in imagelist:
-        maillist[index].images.append(img)
-    imagelist = []
-    logger.info(f"mail[{maillist[index].no}]：配图收集结束，共收集到{len(maillist[index].images)}张图片")
-    # await bot.send(event, f"mail[{maillist[index].no}]：图片收集完成")
-    if maillist[index].stat == 2:
-        maillist[index].stat = 3
-        scheduler.add_job(send2bili, trigger="date",
-                          run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
-                          args=(maillist[index], event), id=str(maillist[index].no))
-        await bot.send(event, maillist[index].preview())
-    else:
-        maillist[index].stat = 1
+    if isinstance(mail_loadingimg, Mail):
+        index = maillist.index(mail_loadingimg)
+        for img in imagelist:
+            maillist[index].images.append(img)
+        imagelist = []
+        logger.info(f"mail[{maillist[index].no}]：配图收集结束，共收集到{len(maillist[index].images)}张图片")
+        # await bot.send(event, f"mail[{maillist[index].no}]：图片收集完成")
+        if maillist[index].stat == 2:
+            maillist[index].stat = 3
+            scheduler.add_job(send2bili, trigger="date",
+                              run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
+                              args=(maillist[index], event), id=str(maillist[index].no))
+            await bot.send(event, maillist[index].preview())
+        else:
+            maillist[index].stat = 1
     mail_loadingimg = None
     return
 
 
 @load_mail.handle()
 async def loadmail(bot: Bot, event: GroupMessageEvent, state: T_State):
-    global mail_loadingimg, mailcnt
+    global mail_loadingimg
     if mail_loadingimg is not None:
         scheduler.reschedule_job("loadimages", trigger=None)
         await asyncio.sleep(2)
@@ -323,13 +324,12 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
 @get_blog.handle()
 async def getblog(bot: Bot, event: GroupMessageEvent):
     try:
-        blog = await get_latest_blog()
-        content = convert_blog2message(blog)
+        blog = await get_blog_manually()
 
-        await get_blog.send(MessageSegment.text(content[0]))
-        if content[1]:
+        await get_blog.send(blog[0])
+        if len(blog) > 1:
             cnt = 0
-            for img in content[1]:
+            for img in blog[1:]:
                 if img:
                     cnt += 1
                     await get_blog.send(f"第{cnt}张图片" + img)
@@ -340,16 +340,16 @@ async def getblog(bot: Bot, event: GroupMessageEvent):
 
 
 @scheduler.scheduled_job('cron', id='update_blog', hour="7-23", minute=f"*/{TIME_CHECKBLOGUPDATE}")
-async def push_blog():
-    blog = await check_if_blog_update()
+async def pushblog():
+    blog = await get_blog_update()
 
     if blog:
         bot = nonebot.get_bot()
 
         await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=blog[0])
-        if blog[1]:
+        if len(blog) > 1:
             cnt = 0
-            for img in blog[1]:
+            for img in blog[1:]:
                 if img:
                     cnt += 1
                     await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=f"第{cnt}张图片" + img)
@@ -359,11 +359,9 @@ async def push_blog():
 
 
 @get_twi.handle()
-async def gettwi(bot: Bot, event: GroupMessageEvent):
+async def gettweet(bot: Bot, event: GroupMessageEvent):
     try:
-        twi = await get_latest_twi()
-        contents = await convert_twi2message(twi)
-
+        contents = await get_tweet_manually()
         for content in contents:
             await get_twi.send(content)
         await get_twi.finish()
@@ -372,8 +370,8 @@ async def gettwi(bot: Bot, event: GroupMessageEvent):
 
 
 @scheduler.scheduled_job('cron', id='update_twi', hour="7-23", minute=f"*/{TIME_CHECKTWIUPDATE}")
-async def push_twi():
-    twi = await check_if_twi_update()
+async def pushtweet():
+    twi = await get_tweet_update()
 
     if twi:
         bot = nonebot.get_bot()
@@ -387,29 +385,27 @@ async def push_twi():
 
 
 @scheduler.scheduled_job('cron', id='update_mail', hour="7-23", minute=f"*/{TIME_CHECKMAILUPDATE}")
-async def push_mail():
-    content, images, timstp = await check_if_mail_update()
+async def pushmail():
+    _new_mails = await get_mail_update()
 
-    if content:
-        for mail in maillist:
-            if mail.time == int(timstp):
-                logger.info("新mail已在列表中，跳过")
-                return
+    if _new_mails:
+        for new_mail in _new_mails:
+            if_exist = False
+            for mail in maillist:
+                if mail.time == new_mail.time:
+                    logger.info("新mail已在列表中，跳过")
+                    if_exist = True
+                    break
+            if if_exist:
+                continue
+            maillist.append(new_mail)
+            bot = nonebot.get_bot()
 
-        bot = nonebot.get_bot()
-
-        mail = Mail()
-        mail.raw_text = content
-        mail.images = images
-        mail.time = int(timstp)
-        mail.stat = 1
-        maillist.append(mail)
-        logger.debug(f"当前mail时间戳：{mail.time}")
-
-        await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=str(content).strip("\n"))
-        if images:
-            for image in images:
-                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=MessageSegment.image(image))
+            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+            if new_mail.images:
+                for image in new_mail.images:
+                    await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
+                                             message=MessageSegment.image(image))
     else:
         logger.info(f"没有检查到Mail更新")
 

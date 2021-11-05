@@ -1,367 +1,92 @@
-import datetime
-import poplib
-import re
-from email.header import decode_header
-from email.message import Message
-from email.parser import BytesParser
-from email.utils import parseaddr
-from typing import Tuple, List, Union, Optional
+import asyncio
+from typing import Tuple, List, Union
 
-import httpx
 import nonebot
-from dateutil import parser as parse_date
-from httpx import AsyncClient
-from lxml import etree
-from nonebot.adapters.cqhttp.message import MessageSegment
-from nonebot.log import logger
-from nonebot.utils import run_sync
+from nonebot.adapters.cqhttp.message import Message, MessageSegment
 
 from .config import Config
+from .lib.blog import check_blog_update, get_blog_f
+from .lib.mail import check_mail_update
+from .lib.twitter import check_tweet_update, get_tweets_f
+from .lib.utils import get_advanced
+from .model import ParsedObject, Mail
 
-lastblogtime = ""
-lasttwitime = ""
-lastmailtime = ""
-oldtwiset = set([])
 global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
-PROXIES = plugin_config.twi_proxies
-PARAMS = plugin_config.twi_params
-BEARER_TOKEN = plugin_config.twi_bearer_token
-TWI_HEADERS = plugin_config.twi_headers
+PROXIES = plugin_config.proxies
 
 
-async def get_advanced(url: str, params=None, headers=None, proxies=None) -> Union[None, httpx.Response]:
-    """
-        对异步 httpx.get() 方法进行再封装，加入了自动重试和错误捕获。
-
-    :param url:
-    :param params:
-    :param headers:
-    :param proxies:
-    :return: None or httpx.Response object
-    """
-    retry = 5
-    async with AsyncClient(proxies=proxies, headers=headers) as client:
-        while retry:
-            retry = retry - 1
-            try:
-                ret = await client.get(url, params=params)
-                if ret.status_code != httpx.codes.OK:
-                    raise httpx.HTTPStatusError
-                return ret
-            except httpx.HTTPStatusError:
-                logger.warning(f"服务器状态码错误：{ret.status_code}")
-            except httpx.ConnectTimeout:
-                logger.warning("服务器连接超时")
-            except httpx.ReadTimeout:
-                logger.warning("服务器读取超时")
-            except httpx.ProxyError:
-                logger.warning("代理服务器出错")
-            except httpx.RequestError:
-                logger.exception("网络错误")
-        else:
-            logger.error("所有Get尝试均失败，返回None")
-            return None
-
-
-async def get_latest_blog():
-    ret = await get_advanced(f"https://blog.nogizaka46.com/{plugin_config.member_abbr}/atom.xml")
-    if ret:
-        tree = etree.XML(ret.content)
-        return tree
-    else:
-        raise ValueError("下载到的博客内容为空")
-
-
-def parse_blog(tree):
-    ns = {"ns": "http://www.w3.org/2005/Atom"}
-    images = None
-    imgcnt = 1
-
-    date = tree.xpath('//ns:entry[1]/ns:published/text()', namespaces=ns)[0]
-    title = tree.xpath('//ns:entry[1]/ns:title/text()', namespaces=ns)[0]
-    entry1 = tree.xpath('//ns:entry[1]/ns:content/text()', namespaces=ns)[0]  # XPath中列表下标从1开始
-
-    text = f"日期：{date[:10]}\n" \
-           f"标题：{title}\n"
-
-    contenthtml = etree.HTML(entry1)
-    text += "\n"
-    for element in contenthtml.iter():
-        if element.tag == "p" and text[-1] != "\n":
-            text += "\n"
-        if element.text:
-            text += element.text
-        if element.tail:
-            text += element.tail
-        if element.tag == "img":
-            text += f"【第{imgcnt}张图片的位置】"
-            images += MessageSegment.image(element.get("src"))
-            imgcnt += 1
-        if element.tag == "br":
-            text += "\n" if text[-1] == "\n" else "\n\n"
-    text = re.sub(r"^\s*", "", text).strip("\n")
-    return [text, images]
-
-
-def parse_blog_time(tree) -> str:
-    ns = {"ns": "http://www.w3.org/2005/Atom"}
-    date = tree.xpath('//ns:entry[1]/ns:published/text()', namespaces=ns)[0]
-    return date[:10]
-
-
-def convert_blog2message(blog):
-    return parse_blog(blog)
-
-
-async def check_if_blog_update():
-    global lastblogtime
-    try:
-        latestblog = await get_latest_blog()
-        newtime = parse_blog_time(latestblog)
-        if newtime != lastblogtime:
-            logger.info(f"发现博客更新")
-            lastblogtime = newtime
-            return convert_blog2message(latestblog)
-        else:
-            return False
-    except ValueError as errmsg:
-        logger.error(f"自动获取博客更新失败：{errmsg}")
-        return False
-
-
-async def blog_initial():
-    global lastblogtime
-    latestblog = await get_latest_blog()
-    lastblogtime = parse_blog_time(latestblog)
-
-
-async def get_latest_twi():
-    ret = await get_advanced("https://api.twitter.com/2/users/{}/tweets".format(317684165),  # @nogizaka46
-                             params=PARAMS, proxies=PROXIES, headers=TWI_HEADERS)
-    if ret:
-        ret = ret.json()
-        return ret
-    else:
-        raise ValueError("下载到的推文内容为空")
-
-
-async def download_twi_img(url: str):
-    ret = await get_advanced(url, proxies=PROXIES)
+async def _download_image(url: str) -> bytes:
+    ret = None
+    if PROXIES:  # 优先通过代理下载，失败时自动转为直连下载
+        ret = await get_advanced(url, proxies=PROXIES)
+    if not ret:
+        ret = await get_advanced(url)
     if ret:
         ret = ret.content
         return ret
     else:
-        raise ValueError("下载推文图片为空")
+        raise ValueError("下载到的图片为空")
 
 
-async def parse_twi(js: dict, update=False):
-    msgs = []
-    for entry in js["data"]:
-        twiid = entry["id"]
-        text = entry["text"]
-        # if True:    # DEBUG ONLY
-        flag_keyword = False
-        for keyword in plugin_config.twi_moni_keywords:
-            if text.find(keyword) != -1:
-                flag_keyword = True
-                break
-        if flag_keyword or not update:
-            if twiid in oldtwiset and update:
-                continue  # 当处于自动更新状态时，自动跳过已经发过的推特
-            oldtwiset.add(twiid)
-            msg = MessageSegment.text("【推特更新】\n@乃木坂46：")
-            logger.info(f"当前处理推文：{repr(entry)}")
-            if "urls" in entry["entities"]:
-                for url in entry["entities"]["urls"]:
-                    if url["display_url"].find("pic.twitter.com") == -1 and url["display_url"].find("dlvr.it") == -1:
-                        text = text.replace(url["url"], url["display_url"])
-                    else:
-                        text = text.replace(url["url"], "")
-            msg += MessageSegment.text(text)
-            if "attachments" in entry:
-                if "media_keys" in entry["attachments"]:
-                    for media_key in entry["attachments"]["media_keys"]:
-                        for item in js["includes"]["media"]:
-                            if item["media_key"] == media_key:
-                                if item["type"] == "photo":
-                                    logger.info(f"推文图片信息：{repr(item)}")
-                                    img = await download_twi_img(item["url"])
-                                    msg += MessageSegment.image(img)
-                                    break
-                                if item["type"] == "video":
-                                    logger.info(f"推文视频信息：{repr(item)}")
-                                    img = await download_twi_img(item["preview_image_url"])
-                                    msg += MessageSegment.image(img)
-                                    break
-            # msg += MessageSegment.text(f"发送时间：{entry['created_at']}")
-            msgs.append(msg)
-    return msgs
+async def parse_po2msg(po: ParsedObject) -> MessageSegment:
+    msg = MessageSegment.text(po.text)
+    if po.images_url:
+        img_tasks = [_download_image(url) for url in po.images_url]
+        imgs = await asyncio.gather(*img_tasks)
+        if None in imgs:
+            raise ValueError("没有完整地下载到图片")
+        img_msgs = [MessageSegment.image(img) for img in imgs]
+        msg += img_msgs
+    return msg
 
 
-async def convert_twi2message(twi):
-    return await parse_twi(twi)
+async def get_blog_update() -> Union[Message, MessageSegment]:
+    po = await check_blog_update()
+    if po:
+        msg = await parse_po2msg(po)
+        return msg
 
 
-def update_twi_time(js: dict) -> str:
-    oldest_id = js["meta"]["oldest_id"]
-    logger.debug(f"oldtwiset状态：{oldtwiset}")
-
-    for key in oldtwiset.copy():
-        if key < oldest_id:
-            oldtwiset.remove(key)  # 清除set中时间晚于最后一条推特发送时间的推特
-
-    return js["meta"]["newest_id"]
+async def get_blog_manually() -> Union[Message, MessageSegment]:
+    po = await get_blog_f()
+    if po:
+        msg = await parse_po2msg(po)
+        return msg
 
 
-async def check_if_twi_update():
-    global lasttwitime
-    try:
-        twi = await get_latest_twi()
-        newtime = update_twi_time(twi)
-        if newtime != lasttwitime:
-            logger.info(f"发现推特更新，正在检查是否与设定关键词有关...")
-            lasttwitime = newtime
-            return await parse_twi(twi, update=True)
-        else:
-            return False
-    except ValueError as errmsg:
-        logger.error(f"自动获取最新推文失败：{errmsg}")
-        return False
+async def get_mail_update() -> List[Mail]:
+    pos = await check_mail_update()
+    if pos:
+        mails = []
+        for po in pos:
+            imgs = []
+            if po.images_url:
+                img_tasks = [_download_image(url) for url in po.images_url]
+                imgs = await asyncio.gather(*img_tasks)
+                if None in imgs:
+                    raise ValueError("没有完整地下载到图片")
+
+            m = Mail()
+            m.raw_text = po.text
+            m.images = imgs
+            m.time = int(po.timestamp)
+            m.stat = 1
+            mails.append(m)
+        return mails
 
 
-async def twi_initial():
-    global lasttwitime
-    latesttwi = await get_latest_twi()
-    await parse_twi(latesttwi, update=True)  # 空转一次，更新set
-    lasttwitime = update_twi_time(latesttwi)
+async def get_tweet_update() -> Tuple[MessageSegment, ...]:
+    pos = await check_tweet_update()
+    if pos:
+        tweet_tasks = [parse_po2msg(po) for po in pos]
+        tweets_msgs = await asyncio.gather(*tweet_tasks)
+        return tweets_msgs
 
 
-def guess_charset(msg):
-    charset = msg.get_charset()
-    if charset is None:
-        content_type = msg.get('Content-Type', '').lower()
-        pos = content_type.find('charset=')
-        if pos >= 0:
-            charset = content_type[pos + 8:].strip()
-    return charset
-
-
-def decode_str(s):
-    value, charset = decode_header(s)[0]
-    if charset:
-        value = value.decode(charset)
-    return value
-
-
-def parse_mail_raw_content(mail: Message):
-    if mail.is_multipart():
-        parts = mail.get_payload()
-        for part in parts:  # get_payload之后对payload进行遍历
-            content_type = part.get_content_type()
-            if content_type == 'text/html':
-                content = part.get_payload(decode=True)
-                charset = guess_charset(part)
-                if charset:
-                    content = content.decode(charset)
-                return content
-
-
-def parse_mail_header(mail: Message):
-    from_raw = mail.get("From" '')
-    _, from_addr = parseaddr(from_raw)
-
-    subject_raw = mail.get("Subject", "")
-    subject_str = "标题：" + decode_str(subject_raw)
-
-    date_raw = mail.get("Date", "")
-    date_jst = parse_date.parse(date_raw)
-    cst = datetime.timezone(datetime.timedelta(hours=8))
-    date_cst = date_jst.astimezone(cst).replace(second=0, microsecond=0)
-    time_stp = str(int(date_cst.timestamp()))
-    date_str = f"时间：{date_cst.year}年{date_cst.month}月{date_cst.day}日 " \
-               f"{str(date_cst.time())[:-3]}"
-    return from_addr, subject_str, date_str, time_stp
-
-
-def parse_mail_content(raw_content: str):
-    root = etree.HTML(raw_content)
-    body = root[1]
-    content_str = ""
-    images_url = []
-    for text in body.iter():
-        # print("%s - %s" % (text.tag, text.text))
-        if text.text:
-            content_str += text.text + "\n"
-        if text.tag == "br":
-            content_str += "\n"
-        if text.tag == "img":
-            # content_str += MessageSegment.image(text.get("src")) + "\n"
-            images_url.append(text.get("src"))
-    return content_str, images_url
-
-
-@run_sync
-def get_latest_mail() -> Union[Tuple[None, None, None], Tuple[str, Tuple[Optional[str], ...], str]]:
-    email = plugin_config.mail_recv_addr
-    password = plugin_config.mail_recv_pwd.get_secret_value()
-    pop3_server = plugin_config.pop3_server
-    moni_addr = plugin_config.moni_addrs
-
-    # 连接到POP3服务器:
-    server = poplib.POP3_SSL(pop3_server)
-    server.user(email)
-    server.pass_(password)
-
-    resp, mails, octets = server.list()
-    index = len(mails)
-    while index:
-        logger.debug(f"正在检查第{len(mails) - index + 1}封邮件")
-        _, lines, _ = server.retr(index)  # 获取最新邮件
-        msg_content = b'\r\n'.join(lines)
-        parser = BytesParser()
-        msg = parser.parsebytes(msg_content)
-
-        addr, subj, tim, timstp = parse_mail_header(msg)
-        if addr in moni_addr:
-            rawcontent = parse_mail_raw_content(msg)
-            content, images_url = parse_mail_content(rawcontent)
-            # print(f"{tim}\n{subj}\n{content}")
-            server.quit()
-            return f"{tim}\n{subj}\n{content}", tuple(images_url), timstp
-        else:
-            index = index - 1
-    server.quit()
-    return None, None, None
-
-
-async def download_mail_images(imgs_url: List) -> Tuple[bytes, ...]:
-    images = []
-    if imgs_url:
-        for url in imgs_url:
-            img = await get_advanced(url)
-            if img:
-                images.append(img.content)
-            else:
-                raise ValueError("下载mail配图错误，mail更新失败")
-        return tuple(images)
-
-
-async def check_if_mail_update() -> Union[Tuple[None, None, None], Tuple[str, Tuple[bytes, ...], str]]:
-    global lastmailtime
-    content, images_url, timstp = await get_latest_mail()
-    if content and timstp > lastmailtime:
-        logger.info("发现mail更新")
-        try:
-            images = await download_mail_images(images_url)
-            lastmailtime = timstp
-            return content, images, timstp
-        except ValueError as errmsg:
-            logger.error(errmsg)
-    return None, None, None
-
-
-async def mail_initial():
-    global lastmailtime
-    _, _, timstp = await get_latest_mail()
-    lastmailtime = timstp
+async def get_tweet_manually() -> Tuple[MessageSegment, ...]:
+    pos = await get_tweets_f()
+    if pos:
+        tweet_tasks = [parse_po2msg(po) for po in pos]
+        tweets_msgs = await asyncio.gather(*tweet_tasks)
+        return tweets_msgs
