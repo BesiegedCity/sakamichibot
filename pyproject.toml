@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sakamichibot"
-version = "0.4.1"
+version = "0.5.5"
 description = "A QQ bot based on Nonebot2, offering Quiz Function about Nogizaka and helper tools of subtitle group."
 authors = ["namiya233 <hfweicheng@outlook.com>"]
 license = "MIT"
@@ -23,10 +23,10 @@ emoji = "^1.6.1"
 plugins = []
 plugin_dirs = ["src/plugins"]
 
-[[tool.poetry.source]]
-name = "tuna"
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-default = true
+# [[tool.poetry.source]]
+# name = "tuna"
+# url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# default = true
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
