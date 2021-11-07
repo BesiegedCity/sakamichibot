@@ -1,5 +1,5 @@
 import asyncio
-from typing import Tuple, List, Union
+from typing import List, Union
 
 import nonebot
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
@@ -82,37 +82,23 @@ async def get_mail_update() -> List[Mail]:
         return mails
 
 
-async def get_tweet_update() -> Tuple[List[MessageSegment], List[Mail]]:
+async def get_tweet_update() -> List[Mail]:
     pos = await check_tweet_update()
     if pos:
         tweet_mails = []
-        tweet_msgs = []
         for po in pos:
             tweet_mails.append(await parse_po2mail(po, "tweet"))
-        for mail in tweet_mails:
-            t = MessageSegment.text(mail.raw_text)
-            if mail.images:
-                for image in mail.images:
-                    t += MessageSegment.image(image)
-            tweet_msgs.append(t)
-        return tweet_msgs, tweet_mails
+        return tweet_mails
     else:
-        return [], []
+        return []
 
 
-async def get_tweet_manually() -> Tuple[List[MessageSegment], List[Mail]]:
+async def get_tweet_manually() -> List[Mail]:
     pos = await get_tweets_f()
     if pos:
         tweet_mails = []
-        tweet_msgs = []
         for po in pos:
             tweet_mails.append(await parse_po2mail(po, "tweet"))
-        for mail in tweet_mails:
-            t = MessageSegment.text(mail.raw_text)
-            if mail.images:
-                for image in mail.images:
-                    t += MessageSegment.image(image)
-            tweet_msgs.append(t)
-        return tweet_msgs, tweet_mails
+        return tweet_mails
     else:
-        return [], []
+        return []

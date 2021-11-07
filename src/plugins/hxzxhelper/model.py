@@ -16,9 +16,24 @@ global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
 
 
+def circle_corner(img: Image.Image, radii: int) -> Image.Image:
+    circle = Image.new('L', (radii * 2, radii * 2), 0)
+    draw = ImageDraw.Draw(circle)
+    draw.ellipse((0, 0, radii * 2, radii * 2), fill=255)
+    img = img.convert("RGBA")
+    w, h = img.size
+    alpha = Image.new("L", img.size, 255)
+    alpha.paste(circle.crop((0, 0, radii, radii)), (0, 0))  # 本质上是修改圆角外部的区域透明度为0，内部255
+    alpha.paste(circle.crop((radii, 0, radii * 2, radii)), (w - radii, 0))
+    alpha.paste(circle.crop((radii, radii, radii * 2, radii * 2)), (w - radii, h - radii))
+    alpha.paste(circle.crop((0, radii, radii, radii * 2)), (0, h - radii))
+    img.putalpha(alpha)
+    return img
+
+
 def square_n_thumb(imglist: list, sidelength: int) -> list:
     """
-    将图片裁减为方形，并生成缩略图
+    将图片裁减为圆角方形（转换为RGBA模式），并生成缩略图
 
     :param imglist: 存放图片的List
     :param sidelength: 缩略图需要的边长
@@ -31,6 +46,7 @@ def square_n_thumb(imglist: list, sidelength: int) -> list:
         imglist[i] = imglist[i].crop((cut_width, cut_height,
                                       imglist[i].size[0] - cut_width, imglist[i].size[1] - cut_height))
         imglist[i].thumbnail((sidelength, sidelength))
+        imglist[i] = circle_corner(imglist[i], 10)
     return imglist
 
 
@@ -160,28 +176,29 @@ class Mail(object):
         logger.debug(f"最终文字高度：{height_offset}")
 
         height_pic = background.size[1]
-        pic_ground = background.copy()  # 没有图片的时候只粘贴一段默认空白背景
+        pic_ground = background.copy().convert("RGBA")  # 没有图片的时候只粘贴一段默认空白背景
         if imgs:
             if len(imgs) == 1:
                 sidelen = width - 30 * 2
                 rate = sidelen / imgs[0].size[0]
                 imgs[0] = imgs[0].resize((int(rate * imgs[0].size[0]), int(rate * imgs[0].size[1])))
                 height_pic = imgs[0].size[1]
-                pic_ground = Image.new("RGB", size=(width, height_pic), color=(255, 255, 255))
+                imgs[0] = circle_corner(imgs[0], 10)
+                pic_ground = Image.new("RGBA", size=(width, height_pic), color=(255, 255, 255))
                 pic_ground.paste(imgs[0], box=(30, 0))
             else:
                 if len(imgs) == 2:
                     sidelen = round((width - 30 * 2 - 15) / 2)
                     height_pic = sidelen
                     imgs = square_n_thumb(imgs, sidelen)
-                    pic_ground = Image.new("RGB", size=(width, height_pic), color=(255, 255, 255))
+                    pic_ground = Image.new("RGBA", size=(width, height_pic), color=(255, 255, 255))
                     pic_ground.paste(imgs[0], box=(30, 0))
                     pic_ground.paste(imgs[1], box=(30 + sidelen + 15, 0))
                 else:
                     sidelen = round((width - 30 * 2 - 15 * 2) / 3)
                     height_pic = (sidelen + 15) * ceil(len(imgs) / 3) - 15
                     imgs = square_n_thumb(imgs, sidelen)
-                    pic_ground = Image.new("RGB", size=(width, height_pic), color=(255, 255, 255))
+                    pic_ground = Image.new("RGBA", size=(width, height_pic), color=(255, 255, 255))
 
                     column_cursor = 0
                     row_cursor = - (sidelen + 15)
@@ -199,10 +216,10 @@ class Mail(object):
 
         height_total = height_top + height_text + height_pic + height_bottom
 
-        final = Image.new("RGB", (width, height_total))  # 前面计算需要多少高度，并准备好图片的四个部分（top/text/pic/bottom）
+        final = Image.new("RGB", (width, height_total), (255, 255, 255))  # 前面计算需要多少高度，并准备好图片的四个部分（top/text/pic/bottom）
         final.paste(top, box=(0, 0))
         final.paste(text_ground, box=(0, height_top))
-        final.paste(pic_ground, box=(0, height_top + height_text))
+        final.paste(pic_ground, box=(0, height_top + height_text), mask=pic_ground.split()[3])
         final.paste(bottom, box=(0, height_top + height_text + height_pic))
         ret = BytesIO()
         final.save(ret, format="jpeg")

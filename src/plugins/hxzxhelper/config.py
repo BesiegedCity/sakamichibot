@@ -1,10 +1,7 @@
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, Optional
 
 from bilibili_api import Credential
 from pydantic import BaseSettings, validator, EmailStr, SecretStr, AnyUrl
-
-
-#TODO 需要将将部分设置设置为可选，并且设置相应的总开关
 
 
 class Config(BaseSettings):
@@ -12,12 +9,13 @@ class Config(BaseSettings):
     fansub_senders: Tuple[str, ...] = ("",)
     fansub_masters: Tuple[str, ...] = ("",)
     fansub_groups: Tuple[int, ...] = (0,)  # 0号位群组用于debug时的推送，默认设置为0
-    proxies: Union[AnyUrl, Dict[str, AnyUrl]] = {"all://": "http://127.0.0.1:7890"}
+    proxies: Optional[Union[AnyUrl, Dict[str, AnyUrl]]]
     debug: bool = False
 
     # 时间设置中的单位均为分钟
 
     # Mail推送功能
+    mail: bool = False
     time_checkmailupdate: int = 5
     mail_recv_addr: EmailStr = ""
     mail_recv_pwd: SecretStr = ""
@@ -25,6 +23,7 @@ class Config(BaseSettings):
     moni_addrs: Tuple[EmailStr, ...] = ("",)
 
     # 官方博客推送功能
+    blog: bool = False
     time_checkblogupdate: int = 10
     member_abbr: str = "haruka.kaki"
 
@@ -35,8 +34,9 @@ class Config(BaseSettings):
     bili_cred: Union[Credential, Dict[str, str]] = {"sessdata": "", "bili_jct": "", "buvid3": ""}
 
     # 官方推特推送功能（部分字段请参考Twitter API）
+    tweet: bool = False
     time_checktweetupdate: int = 5
-    tweet_moni_keywords: Tuple[str, ...] = ["賀喜遥香", ]
+    tweet_moni_keywords: Tuple[str, ...] = ("賀喜遥香",)
     tweet_bearer_token: str = ""
     tweet_headers: Dict[str, str] = {}
 

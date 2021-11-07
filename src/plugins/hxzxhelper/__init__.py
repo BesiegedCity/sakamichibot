@@ -16,7 +16,6 @@ from nonebot.adapters import Bot, Event
 from nonebot.adapters.cqhttp.event import GroupMessageEvent
 from nonebot.adapters.cqhttp.message import MessageSegment
 from nonebot.log import logger
-from nonebot.rule import Rule
 from nonebot.typing import T_State
 
 from .config import Config
@@ -54,9 +53,19 @@ async def initial():  # 初始化必须成功，否则第一次获取博客和�
     else:
         logger.info("当前处于生产环境")
         push_group = 1
-
-    await asyncio.gather(blog_initial(), tweet_initial(), mail_initial())
-    logger.info("博客、推特、Mail更新组件初始化完毕")
+    init_list = []
+    init_str = ""
+    if plugin_config.blog:
+        init_list.append(blog_initial())
+        init_str += "博客 "
+    if plugin_config.tweet:
+        init_list.append(tweet_initial())
+        init_str += "推特 "
+    if plugin_config.mail:
+        init_list.append(mail_initial())
+        init_str += "Mail "
+    await asyncio.gather(*init_list)
+    logger.info(init_str + "自动更新组件初始化完毕")
 
 
 def parse_time(timestr: str) -> str:
@@ -75,7 +84,7 @@ def parse_time(timestr: str) -> str:
                                hour=int(hms[0]), minute=int(hms[1]), second=int(hms[2]))
         return str(int(tm.timestamp()))
     else:
-        raise ValueError("导入时间信息出错：年月日时分信息存在缺失")
+        raise ValueError("导入时间信息出错：年月日时分信息可能存在缺失")
 
 
 async def checkifmastergroup(bot: Bot, event: Event, state: T_State) -> bool:
@@ -132,14 +141,6 @@ async def checkifmailimage(bot: Bot, event: Event, state: T_State):
         return False
 
 
-async def checkifreply(bot: Bot, event: Event, state: T_State):
-    if isinstance(event, GroupMessageEvent):
-        if event.reply and event.to_me:
-            return True
-        else:
-            return False
-
-
 load_mail = on_startswith("时间", rule=checkifsender, priority=5)
 # 检测到“时间”开头的消息后，等一分钟用于收集配图，一分钟内若遇到第二个以“时间”开头的消息，则立即停止前一个消息的图片收集。
 load_trans = on_startswith("时间", rule=checkifnotsender, priority=6)
@@ -147,8 +148,6 @@ load_trans = on_startswith("时间", rule=checkifnotsender, priority=6)
 load_img = on_message(rule=checkifmailimage, priority=5)
 show_tasks = on_command("发送队列", rule=checkifmaster, priority=4)
 cancel_task = on_command("取消发送", rule=checkifmastergroup, priority=4)
-get_blog = on_command("最新博客", priority=5)
-get_twi = on_command("最新推文", priority=5)
 
 
 async def send2bili(mail: Mail, event: GroupMessageEvent):
@@ -297,11 +296,10 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
             raise IndexError
     except ValueError as errmsg:
         logger.error(errmsg)
-        await load_mail.finish()
+        await load_trans.finish(str(errmsg))
     except IndexError:
-        logger.error("没有在队列中找到与时间相匹配的mail")
-        # await load_trans.finish("没有在队列中找到与时间相匹配的mail")
-        await load_mail.finish()
+        logger.error("没有在队列中找到对应时间的待发送内容")
+        await load_trans.finish("没有在队列中找到对应时间的待发送内容")
     if mails_dict[targetmail].type == "tweet":
         raw_msg = re.sub("时间.*", "", raw_msg)
         raw_msg = re.sub("标题.*", "", raw_msg)
@@ -327,98 +325,112 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
         mails_dict[targetmail].stat = 2
 
 
-@get_blog.handle()
-async def getblog(bot: Bot, event: GroupMessageEvent):
-    try:
-        blog = await get_blog_manually()
-
-        await get_blog.send(blog[0])
-        if len(blog) > 1:
-            cnt = 0
-            for img in blog[1:]:
-                if img:
-                    cnt += 1
-                    await get_blog.send(f"第{cnt}张图片" + img)
-        await get_blog.finish()
-
-    except ValueError as errmsg:
-        await get_blog.finish(f"获取最新博客失败：{errmsg}")
+if plugin_config.blog:
+    get_blog = on_command("最新博客", priority=5)
 
 
-@scheduler.scheduled_job('cron', id='update_blog', hour="7-23", minute=f"*/{TIME_CHECKBLOGUPDATE}")
-async def pushblog():
-    blog = await get_blog_update()
+    @get_blog.handle()
+    async def getblog(bot: Bot, event: GroupMessageEvent):
+        try:
+            blog = await get_blog_manually()
 
-    if blog:
-        bot = nonebot.get_bot()
+            await get_blog.send(blog[0])
+            if len(blog) > 1:
+                cnt = 0
+                for img in blog[1:]:
+                    if img:
+                        cnt += 1
+                        await get_blog.send(f"第{cnt}张图片" + img)
+            await get_blog.finish()
 
-        await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=blog[0])
-        if len(blog) > 1:
-            cnt = 0
-            for img in blog[1:]:
-                if img:
-                    cnt += 1
-                    await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=f"第{cnt}张图片" + img)
-        await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message="我的博客更新啦ヾ(≧▽≦*)o，快来翻译")
-    else:
-        logger.info(f"没有检查到博客更新")
+        except ValueError as errmsg:
+            await get_blog.finish(f"获取最新博客失败：{errmsg}")
 
 
-@get_twi.handle()
-async def gettweet(bot: Bot, event: GroupMessageEvent):
-    try:
-        tweet_msgs, tweet_mails = await get_tweet_manually()
-        if tweet_msgs:
+    @scheduler.scheduled_job('cron', id='update_blog', hour="7-23", minute=f"*/{TIME_CHECKBLOGUPDATE}")
+    async def pushblog():
+        blog = await get_blog_update()
+
+        if blog:
+            bot = nonebot.get_bot()
+
+            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=blog[0])
+            if len(blog) > 1:
+                cnt = 0
+                for img in blog[1:]:
+                    if img:
+                        cnt += 1
+                        await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=f"第{cnt}张图片" + img)
+            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message="我的博客更新啦ヾ(≧▽≦*)o，快来翻译")
+        else:
+            logger.info(f"没有检查到博客更新")
+
+if plugin_config.tweet:
+    get_twi = on_command("最新推文", priority=5)
+
+
+    @get_twi.handle()
+    async def gettweet(bot: Bot, event: GroupMessageEvent):
+        try:
+            tweet_mails = await get_tweet_manually()
+            if tweet_mails:
+                for mail in tweet_mails:
+                    if mail.time not in mails_dict:
+                        mails_dict[mail.time] = mail
+
+                    t = MessageSegment.text(mail.raw_text)
+                    if mail.images:
+                        for image in mail.images:
+                            t += MessageSegment.image(image)
+                    await get_twi.send(t)
+            await get_twi.finish()
+        except ValueError as errmsg:
+            await get_twi.finish(f"获取最新推文失败：{errmsg}")
+
+
+    @scheduler.scheduled_job('cron', id='update_twi', hour="7-23", minute=f"*/{TIME_CHECKTWIUPDATE}")
+    async def pushtweet():
+        tweet_mails = await get_tweet_update()
+
+        if tweet_mails:
+            bot = nonebot.get_bot()
+
             for mail in tweet_mails:
                 if mail.time not in mails_dict:
                     mails_dict[mail.time] = mail
 
-            for message in tweet_msgs:
-                await get_twi.send(message)
-            await get_twi.finish()
-    except ValueError as errmsg:
-        await get_twi.finish(f"获取最新推文失败：{errmsg}")
+                    t = MessageSegment.text(mail.raw_text)
+                    if mail.images:
+                        for image in mail.images:
+                            t += MessageSegment.image(image)
+                    await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=t)
+        else:
+            logger.info(f"没有检查到推特更新")
+
+if plugin_config.mail:
+    @scheduler.scheduled_job('cron', id='update_mail', hour="7-23", minute=f"*/{TIME_CHECKMAILUPDATE}")
+    async def pushmail():
+        _new_mails = await get_mail_update()
+
+        if _new_mails:
+            for new_mail in _new_mails:
+                if new_mail.time in mails_dict:
+                    logger.info("新mail已在列表中，跳过")
+                    continue
+                mails_dict[new_mail.time] = new_mail
+                bot = nonebot.get_bot()
+
+                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+                if new_mail.images:
+                    for image in new_mail.images:
+                        await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
+                                                 message=MessageSegment.image(image))
+        else:
+            logger.info(f"没有检查到Mail更新")
 
 
-@scheduler.scheduled_job('cron', id='update_twi', hour="7-23", minute=f"*/{TIME_CHECKTWIUPDATE}")
-async def pushtweet():
-    tweet_msgs, tweet_mails = await get_tweet_update()
-
-    if tweet_msgs:
-        for mail in tweet_mails:
-            if mail.time not in mails_dict:
-                mails_dict[mail.time] = mail
-
-        bot = nonebot.get_bot()
-        for message in tweet_msgs:
-            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=message)
-    else:
-        logger.info(f"没有检查到推特更新")
-
-
-@scheduler.scheduled_job('cron', id='update_mail', hour="7-23", minute=f"*/{TIME_CHECKMAILUPDATE}")
-async def pushmail():
-    _new_mails = await get_mail_update()
-
-    if _new_mails:
-        for new_mail in _new_mails:
-            if new_mail.time in mails_dict:
-                logger.info("新mail已在列表中，跳过")
-                continue
-            mails_dict[new_mail.time] = new_mail
-            bot = nonebot.get_bot()
-
-            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
-            if new_mail.images:
-                for image in new_mail.images:
-                    await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
-                                             message=MessageSegment.image(image))
-    else:
-        logger.info(f"没有检查到Mail更新")
-
-
-@scheduler.scheduled_job('cron', id='clean_mail', hour="3")
-async def cleanmaildict():
-    global mails_dict
-    mails_dict = {}
-    logger.info("过去一天中尚未发送的mail和tweet已经清除")
+    @scheduler.scheduled_job('cron', id='clean_mail', hour="3")
+    async def cleanmaildict():
+        global mails_dict
+        mails_dict = {}
+        logger.warning("过去一天中尚未发送的mail和tweet已经清除")
