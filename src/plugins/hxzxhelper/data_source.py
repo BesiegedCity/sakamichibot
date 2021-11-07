@@ -41,6 +41,23 @@ async def parse_po2msg(po: ParsedObject) -> MessageSegment:
     return msg
 
 
+async def parse_po2mail(po: ParsedObject, mail_type: str) -> Mail:
+    imgs = []
+    if po.images_url:
+        img_tasks = [_download_image(url) for url in po.images_url]
+        imgs = await asyncio.gather(*img_tasks)
+        if None in imgs:
+            raise ValueError("没有完整地下载到图片")
+
+    m = Mail()
+    m.raw_text = po.text
+    m.images = imgs
+    m.time = po.timestamp
+    m.stat = 1
+    m.type = mail_type
+    return m
+
+
 async def get_blog_update() -> Union[Message, MessageSegment]:
     po = await check_blog_update()
     if po:
@@ -60,33 +77,38 @@ async def get_mail_update() -> List[Mail]:
     if pos:
         mails = []
         for po in pos:
-            imgs = []
-            if po.images_url:
-                img_tasks = [_download_image(url) for url in po.images_url]
-                imgs = await asyncio.gather(*img_tasks)
-                if None in imgs:
-                    raise ValueError("没有完整地下载到图片")
-
-            m = Mail()
-            m.raw_text = po.text
-            m.images = imgs
-            m.time = int(po.timestamp)
-            m.stat = 1
+            m = await parse_po2mail(po, "mail")
             mails.append(m)
         return mails
 
 
-async def get_tweet_update() -> Tuple[MessageSegment, ...]:
+async def get_tweet_update() -> Tuple[List[MessageSegment], List[Mail]]:
     pos = await check_tweet_update()
     if pos:
-        tweet_tasks = [parse_po2msg(po) for po in pos]
-        tweets_msgs = await asyncio.gather(*tweet_tasks)
-        return tweets_msgs
+        tweet_mails = []
+        tweet_msgs = []
+        for po in pos:
+            tweet_mails.append(await parse_po2mail(po, "tweet"))
+        for mail in tweet_mails:
+            t = MessageSegment.text(mail.raw_text)
+            if mail.images:
+                for image in mail.images:
+                    t += MessageSegment.image(image)
+            tweet_msgs.append(t)
+        return tweet_msgs, tweet_mails
 
 
-async def get_tweet_manually() -> Tuple[MessageSegment, ...]:
+async def get_tweet_manually() -> Tuple[List[MessageSegment], List[Mail]]:
     pos = await get_tweets_f()
     if pos:
-        tweet_tasks = [parse_po2msg(po) for po in pos]
-        tweets_msgs = await asyncio.gather(*tweet_tasks)
-        return tweets_msgs
+        tweet_mails = []
+        tweet_msgs = []
+        for po in pos:
+            tweet_mails.append(await parse_po2mail(po, "tweet"))
+        for mail in tweet_mails:
+            t = MessageSegment.text(mail.raw_text)
+            if mail.images:
+                for image in mail.images:
+                    t += MessageSegment.image(image)
+            tweet_msgs.append(t)
+        return tweet_msgs, tweet_mails

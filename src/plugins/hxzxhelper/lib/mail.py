@@ -67,10 +67,9 @@ def parse_mail_header(mail: Message):
     date_raw = mail.get("Date", "")
     date_jst = parse_date.parse(date_raw)
     cst = datetime.timezone(datetime.timedelta(hours=8))
-    date_cst = date_jst.astimezone(cst).replace(second=0, microsecond=0)
-    time_stp = str(int(date_cst.timestamp()))
-    date_str = f"时间：{date_cst.year}年{date_cst.month}月{date_cst.day}日 " \
-               f"{str(date_cst.time())[:-3]}"
+    date_cst = date_jst.astimezone(cst).replace(microsecond=0)
+    time_stp = str(int(date_cst.timestamp()))   # 时间戳不受时区影响
+    date_str = f"时间：{date_cst.year}年{date_cst.month}月{date_cst.day}日 {date_cst.time()}"
     return from_addr, subject_str, date_str, time_stp
 
 

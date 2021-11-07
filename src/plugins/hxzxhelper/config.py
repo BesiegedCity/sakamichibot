@@ -4,6 +4,9 @@ from bilibili_api import Credential
 from pydantic import BaseSettings, validator, EmailStr, SecretStr, AnyUrl
 
 
+#TODO 需要将将部分设置设置为可选，并且设置相应的总开关
+
+
 class Config(BaseSettings):
     # 全局设置
     fansub_senders: Tuple[str, ...] = ("",)

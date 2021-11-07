@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import re
 from io import BytesIO
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import apscheduler.jobstores.base
 import nonebot
@@ -36,9 +36,9 @@ TIME_CHECKBLOGUPDATE = plugin_config.time_checkblogupdate
 TIME_CHECKTWIUPDATE = plugin_config.time_checktweetupdate
 TIME_CHECKMAILUPDATE = plugin_config.time_checkmailupdate
 
-maillist: List[Mail] = []
+mails_dict: Dict[str, Mail] = {}    # 缓存等待处理的mail，格式：{时间戳字符串：Mail}
 imagelist: List[BytesIO] = []
-mail_loadingimg: Optional[Mail] = None
+mail_loadingimg: Optional[str] = ""  # 用于存储正在收集图片的mail的时间戳
 cred = plugin_config.bili_cred
 push_group = 0
 scheduler = nonebot.require("nonebot_plugin_apscheduler").scheduler
@@ -59,17 +59,21 @@ async def initial():  # 初始化必须成功，否则第一次获取博客和�
     logger.info("博客、推特、Mail更新组件初始化完毕")
 
 
-def parse_time(timestr: str):
+def parse_time(timestr: str) -> str:
     year = re.search(r"\d{4}年", timestr)
     month = re.search(r"\d{1,2}月", timestr)
     day = re.search(r"\d{1,2}日", timestr)
-    hournminute = re.search(r"\d{1,2}[:：]\d{1,2}", timestr)
+    hournminute = re.search(r"\d{1,2}([:：]\d{1,2}){1,2}", timestr)
+
     if year and month and day and hournminute:
         hournminute_str = hournminute.group()
-        hournminute = hournminute_str.split("：") if len(hournminute_str.split(":")) == 1 else hournminute_str.split(":")
+        hms = hournminute_str.split("：") if len(hournminute_str.split(":")) == 1 else hournminute_str.split(":")
+        if len(hms) < 3:
+            hms += ["0"] * (3 - len(hms))
+
         tm = datetime.datetime(year=int(year.group()[:-1]), month=int(month.group()[:-1]), day=int(day.group()[:-1]),
-                               hour=int(hournminute[0]), minute=int(hournminute[1]))
-        return tm.timestamp()
+                               hour=int(hms[0]), minute=int(hms[1]), second=int(hms[2]))
+        return str(int(tm.timestamp()))
     else:
         raise ValueError("导入时间信息出错：年月日时分信息存在缺失")
 
@@ -145,14 +149,13 @@ show_tasks = on_command("发送队列", rule=checkifmaster, priority=4)
 cancel_task = on_command("取消发送", rule=checkifmastergroup, priority=4)
 get_blog = on_command("最新博客", priority=5)
 get_twi = on_command("最新推文", priority=5)
-send_by_reply = on_message(rule=Rule(checkifreply) & checkifmastergroup, priority=15)
 
 
 async def send2bili(mail: Mail, event: GroupMessageEvent):
     retry = 6
     bot = nonebot.get_bot(str(event.self_id))
     rsps = {}
-    mailindex = maillist.index(mail)
+    mailindex = mail.time
     logger.info(f"正在发送b站动态，序号：{mail.no}，文字内容：{repr(mail.translation)}")
     try:
         sendrsps = await dynamic.send_dynamic(f"{plugin_config.dynamic_topic}\n" + mail.translation,
@@ -172,7 +175,7 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
                             await bot.send(event, f"mail[{mail.no}]：发送成功（b站已发）")
                     else:
                         await bot.send(event, f"mail[{mail.no}]：发送成功（b站已发）")
-                maillist.pop(mailindex)
+                mails_dict.pop(mailindex)
                 return
             except ServerDisconnectedError as errmsg:
                 retry = retry - 1
@@ -188,8 +191,8 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
 
 @show_tasks.handle()
 async def showmails(bot: Bot, event: GroupMessageEvent):
-    if maillist:
-        for mail in maillist:
+    if mails_dict:
+        for mail in mails_dict.values():
             await show_tasks.send(mail.info())
     else:
         await show_tasks.finish("处理队列为空")
@@ -198,15 +201,16 @@ async def showmails(bot: Bot, event: GroupMessageEvent):
 
 @cancel_task.handle()
 async def canceltask(bot: Bot, event: GroupMessageEvent):
-    index = -1
+    found = False
     arg = str(event.get_message()).strip(" ")
     if arg and arg.isdecimal():
         try:
-            for mail in maillist:
+            for mail in mails_dict.copy().values():
                 if mail.no == int(arg):
-                    index = maillist.pop(maillist.index(mail)).no
+                    mails_dict.pop(mail.time)
+                    found = True
                     break
-            if index == -1:
+            if not found:
                 raise IndexError
             scheduler.remove_job(arg)
             await cancel_task.finish(f"mail[{arg}]：已取消发送")
@@ -230,22 +234,22 @@ async def loadimg(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def loadimg_finish(event: GroupMessageEvent):
     global mail_loadingimg, imagelist
     bot = nonebot.get_bot(str(event.self_id))
-    if isinstance(mail_loadingimg, Mail):
-        index = maillist.index(mail_loadingimg)
+    if mail_loadingimg:
+        index = mail_loadingimg
         for img in imagelist:
-            maillist[index].images.append(img)
+            mails_dict[index].images.append(img)
         imagelist = []
-        logger.info(f"mail[{maillist[index].no}]：配图收集结束，共收集到{len(maillist[index].images)}张图片")
+        logger.info(f"mail[{mails_dict[index].no}]：配图收集结束，共收集到{len(mails_dict[index].images)}张图片")
         # await bot.send(event, f"mail[{maillist[index].no}]：图片收集完成")
-        if maillist[index].stat == 2:
-            maillist[index].stat = 3
+        if mails_dict[index].stat == 2:
+            mails_dict[index].stat = 3
             scheduler.add_job(send2bili, trigger="date",
                               run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
-                              args=(maillist[index], event), id=str(maillist[index].no))
-            await bot.send(event, maillist[index].preview())
+                              args=(mails_dict[index], event), id=str(mails_dict[index].no))
+            await bot.send(event, mails_dict[index].preview())
         else:
-            maillist[index].stat = 1
-    mail_loadingimg = None
+            mails_dict[index].stat = 1
+    mail_loadingimg = ""
     return
 
 
@@ -262,13 +266,13 @@ async def loadmail(bot: Bot, event: GroupMessageEvent, state: T_State):
     else:
         firstlineend = raw_msg.find("\r\n")
     try:
-        mail.time = int(parse_time(raw_msg[:firstlineend]))
+        mail.time = parse_time(raw_msg[:firstlineend])
     except ValueError as errmsg:
         logger.error(errmsg)
         await load_mail.finish()
     mail.raw_text = str(event.get_message()).strip(" ")
-    maillist.append(mail)
-    mail_loadingimg = mail
+    mails_dict[mail.time] = mail
+    mail_loadingimg = mail.time
     scheduler.add_job(loadimg_finish, trigger="date",
                       run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITFORIMAGES),
                       args=(event,), id="loadimages")
@@ -286,12 +290,10 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     else:
         firstlineend = raw_msg.find("\r\n")
     try:
-        transtime = int(parse_time(raw_msg[:firstlineend]))
-        for mail in maillist:
-            if mail.time == transtime:
-                targetmail = maillist.index(mail)
-                break
-        if targetmail == -1:
+        transtime = parse_time(raw_msg[:firstlineend])
+        if transtime in mails_dict:
+            targetmail = transtime
+        else:
             raise IndexError
     except ValueError as errmsg:
         logger.error(errmsg)
@@ -300,25 +302,28 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
         logger.error("没有在队列中找到与时间相匹配的mail")
         # await load_trans.finish("没有在队列中找到与时间相匹配的mail")
         await load_mail.finish()
-    if maillist[targetmail].translation != "":
-        logger.info(f"mail[{maillist[targetmail].no}]：翻译已覆盖")
-        await load_trans.send(f"mail[{maillist[targetmail].no}]：翻译已覆盖")
-    maillist[targetmail].translation = raw_msg
-    logger.info(f"mail[{maillist[targetmail].no}]：翻译已收集")
+    if mails_dict[targetmail].type == "tweet":
+        raw_msg = re.sub("时间.*", "", raw_msg)
+        raw_msg = re.sub("标题.*", "", raw_msg)
+    if mails_dict[targetmail].translation != "":
+        logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
+        await load_trans.send(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
+    mails_dict[targetmail].translation = raw_msg
+    logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已收集")
     # await load_trans.send(f"mail[{targetmail}]：翻译已收集")
-    if maillist[targetmail].stat == 1:
-        maillist[targetmail].stat = 3
+    if mails_dict[targetmail].stat == 1:
+        mails_dict[targetmail].stat = 3
         scheduler.add_job(send2bili, trigger="date",
                           run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
-                          args=(maillist[targetmail], event), id=str(maillist[targetmail].no))
-        await load_trans.finish(maillist[targetmail].preview())
-    elif maillist[targetmail].stat == 3:
-        scheduler.reschedule_job(str(maillist[targetmail].no), trigger="date",
+                          args=(mails_dict[targetmail], event), id=str(mails_dict[targetmail].no))
+        await load_trans.finish(mails_dict[targetmail].preview())
+    elif mails_dict[targetmail].stat == 3:
+        scheduler.reschedule_job(str(mails_dict[targetmail].no), trigger="date",
                                  run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
                                  )
-        await load_trans.finish(maillist[targetmail].preview())
+        await load_trans.finish(mails_dict[targetmail].preview())
     else:
-        maillist[targetmail].stat = 2
+        mails_dict[targetmail].stat = 2
 
 
 @get_blog.handle()
@@ -361,25 +366,31 @@ async def pushblog():
 @get_twi.handle()
 async def gettweet(bot: Bot, event: GroupMessageEvent):
     try:
-        contents = await get_tweet_manually()
-        for content in contents:
-            await get_twi.send(content)
-        await get_twi.finish()
+        tweet_msgs, tweet_mails = await get_tweet_manually()
+        if tweet_msgs:
+            for mail in tweet_mails:
+                if mail.time not in mails_dict:
+                    mails_dict[mail.time] = mail
+
+            for message in tweet_msgs:
+                await get_twi.send(message)
+            await get_twi.finish()
     except ValueError as errmsg:
         await get_twi.finish(f"获取最新推文失败：{errmsg}")
 
 
 @scheduler.scheduled_job('cron', id='update_twi', hour="7-23", minute=f"*/{TIME_CHECKTWIUPDATE}")
 async def pushtweet():
-    twi = await get_tweet_update()
+    tweet_msgs, tweet_mails = await get_tweet_update()
 
-    if twi:
+    if tweet_msgs:
+        for mail in tweet_mails:
+            if mail.time not in mails_dict:
+                mails_dict[mail.time] = mail
+
         bot = nonebot.get_bot()
-
-        for content in twi:
-            notemsg = "\n—————————\n" \
-                      "*如需发送动态请回复此消息并附上翻译内容"
-            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=content + notemsg)
+        for message in tweet_msgs:
+            await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=message)
     else:
         logger.info(f"没有检查到推特更新")
 
@@ -390,15 +401,10 @@ async def pushmail():
 
     if _new_mails:
         for new_mail in _new_mails:
-            if_exist = False
-            for mail in maillist:
-                if mail.time == new_mail.time:
-                    logger.info("新mail已在列表中，跳过")
-                    if_exist = True
-                    break
-            if if_exist:
+            if new_mail.time in mails_dict:
+                logger.info("新mail已在列表中，跳过")
                 continue
-            maillist.append(new_mail)
+            mails_dict[new_mail.time] = new_mail
             bot = nonebot.get_bot()
 
             await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
@@ -410,25 +416,8 @@ async def pushmail():
         logger.info(f"没有检查到Mail更新")
 
 
-@send_by_reply.handle()
-async def sendbyreply(bot: Bot, event: GroupMessageEvent, state: T_State):
-    twi = Mail()
-    raw_twi = event.reply.message
-    if str(raw_twi[0]).find("推特更新") == -1:
-        await send_by_reply.finish()
-
-    twi.raw_text = str(raw_twi) if str(raw_twi) else "无"
-
-    for content in raw_twi:
-        if content.type == "image":
-            async with AsyncClient() as client:
-                img = await client.get(content.data["url"])
-            twi.images.append(img.content)
-
-    twi.translation = str(event.get_message()).strip(" ")
-
-    maillist.append(twi)
-    scheduler.add_job(send2bili, trigger="date",
-                      run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
-                      args=(twi, event), id=str(twi.no))
-    await send_by_reply.finish(twi.preview())
+@scheduler.scheduled_job('cron', id='update_mail', hour="3")
+async def cleanmaildict():
+    global mails_dict
+    mails_dict = {}
+    logger.info("过去一天中尚未发送的mail和tweet已经清除")

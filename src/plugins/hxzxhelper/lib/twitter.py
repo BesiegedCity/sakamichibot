@@ -1,7 +1,7 @@
-from datetime import datetime
-from typing import Optional, List, Tuple
-
 import nonebot
+import datetime
+from typing import Optional, List, Tuple, Dict
+from dateutil.parser import parser
 from nonebot.log import logger
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from ..model import ParsedObject
 
 global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
+time_parser = parser()
 
 RECENT_TWEET_URL = "https://api.twitter.com/2/tweets/search/recent"
 GET_TWEET_URL = "https://api.twitter.com/2/tweets"
@@ -42,7 +43,7 @@ class ReferencedTweets(BaseModel):
 class TweetData(BaseModel):
     entities: Entities
     text: str
-    created_at: datetime
+    created_at: datetime    # "created_at": "2021-11-06T13:27:30.000Z"
     id: str
     author_id: str
     attachments: Optional[Attachment]
@@ -147,8 +148,8 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
 
     twi_ids = []
     twi_users = []
-    twi_images: {str: TweetMedia} = {}
-    twi_data: {str: TweetData} = {}
+    twi_images: Dict[str, TweetMedia] = {}
+    twi_data: Dict[str, List[TweetData]] = {}
     twi_refer = []
 
     if t.includes.media:
@@ -189,7 +190,11 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
                     continue
             if tweet.entities:
                 tweet = remove_urls_in_tweet(tweet)
-            text = f"【推特更新】\n{user.name} @{user.username}:"
+            cst = datetime.timezone(datetime.timedelta(hours=8))
+            tweet_time = tweet.created_at.astimezone(cst).replace(microsecond=0)
+            text = f"时间：{tweet_time.year}年{tweet_time.month}月{tweet_time.day}日 {tweet_time.time()}\n" \
+                   f"标题：【推特更新】\n" \
+                   f"{user.name} @{user.username}:"
             text += tweet.text
             urls = []
             if tweet.attachments:
@@ -199,7 +204,7 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
                     else:
                         url = twi_images[media_key].preview_image_url
                     urls.append(url)
-            po = ParsedObject(text=text, images_url=urls)
+            po = ParsedObject(text=text, images_url=urls, timestamp=str(int(tweet_time.timestamp())))
             msgs.append(po)
             logger.debug(f"处理过的的推文{po}")
 

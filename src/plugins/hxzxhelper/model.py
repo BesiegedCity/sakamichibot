@@ -39,7 +39,7 @@ class Mail(object):
     raw_text: str
     images: Union[List[bytes], List[BufferedIOBase]]
     translation: str
-    time: int
+    time: str
 
     def __init__(self):
         global mailcnt
@@ -48,8 +48,9 @@ class Mail(object):
         self.raw_text = ""
         self.images = []
         self.translation = ""
-        self.time = -1
+        self.time = ""
         self.stat = 0  # 0: 初始状态/非mail内容 1：图片载入完成，等待翻译 2：翻译载入完成，等待图片 3：等待发送
+        self.type = ""  # "tweet" "mail"
 
         mailcnt += 1
 
@@ -72,6 +73,7 @@ class Mail(object):
 
     def info(self):
         msg = MessageSegment.text("序号：" + str(self.no) + "\n")
+        msg += MessageSegment.text(f"类型：{self.type}\n")
         msg += MessageSegment.text("原文：\n")
         if self.raw_text:
             msg += MessageSegment.text("*************\n")
