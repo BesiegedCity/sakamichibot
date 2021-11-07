@@ -305,6 +305,7 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     if mails_dict[targetmail].type == "tweet":
         raw_msg = re.sub("时间.*", "", raw_msg)
         raw_msg = re.sub("标题.*", "", raw_msg)
+    raw_msg = raw_msg.strip("\n")
     if mails_dict[targetmail].translation != "":
         logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
         await load_trans.send(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
@@ -416,7 +417,7 @@ async def pushmail():
         logger.info(f"没有检查到Mail更新")
 
 
-@scheduler.scheduled_job('cron', id='update_mail', hour="3")
+@scheduler.scheduled_job('cron', id='clean_mail', hour="3")
 async def cleanmaildict():
     global mails_dict
     mails_dict = {}

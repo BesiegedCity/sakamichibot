@@ -1,5 +1,5 @@
 import nonebot
-import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple, Dict
 from dateutil.parser import parser
 from nonebot.log import logger
@@ -190,7 +190,7 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
                     continue
             if tweet.entities:
                 tweet = remove_urls_in_tweet(tweet)
-            cst = datetime.timezone(datetime.timedelta(hours=8))
+            cst = timezone(timedelta(hours=8))
             tweet_time = tweet.created_at.astimezone(cst).replace(microsecond=0)
             text = f"时间：{tweet_time.year}年{tweet_time.month}月{tweet_time.day}日 {tweet_time.time()}\n" \
                    f"标题：【推特更新】\n" \

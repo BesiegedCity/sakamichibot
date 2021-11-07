@@ -96,6 +96,8 @@ async def get_tweet_update() -> Tuple[List[MessageSegment], List[Mail]]:
                     t += MessageSegment.image(image)
             tweet_msgs.append(t)
         return tweet_msgs, tweet_mails
+    else:
+        return [], []
 
 
 async def get_tweet_manually() -> Tuple[List[MessageSegment], List[Mail]]:
@@ -112,3 +114,5 @@ async def get_tweet_manually() -> Tuple[List[MessageSegment], List[Mail]]:
                     t += MessageSegment.image(image)
             tweet_msgs.append(t)
         return tweet_msgs, tweet_mails
+    else:
+        return [], []
