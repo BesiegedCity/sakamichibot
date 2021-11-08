@@ -302,7 +302,8 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
         await load_trans.finish("没有在队列中找到对应时间的待发送内容")
     if mails_dict[targetmail].type == "tweet":
         raw_msg = re.sub("时间.*", "", raw_msg)
-        raw_msg = re.sub("标题.*", "", raw_msg)
+        raw_msg = re.sub("【推特更新】", "", raw_msg)
+        raw_msg = re.sub(r"^\s*|\s*$", "", raw_msg)
     raw_msg = raw_msg.strip("\n")
     if mails_dict[targetmail].translation != "":
         logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")

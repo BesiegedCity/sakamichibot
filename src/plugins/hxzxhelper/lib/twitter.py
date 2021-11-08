@@ -17,6 +17,7 @@ RECENT_TWEET_URL = "https://api.twitter.com/2/tweets/search/recent"
 GET_TWEET_URL = "https://api.twitter.com/2/tweets"
 
 newest_twi_id = ""
+_last_newest_twi_id = ""
 
 
 class Attachment(BaseModel):
@@ -128,7 +129,7 @@ def remove_urls_in_tweet(tweet: TweetData) -> TweetData:
     if tweet.entities.urls:
         for url in tweet.entities.urls:
             if url.display_url.find("pic.twitter.com") == -1 and url.display_url.find("dlvr.it") == -1:
-                tweet.text = tweet.text.replace(url.url, url.display_url)
+                tweet.text = tweet.text.replace(url.url, url.expanded_url)
             else:
                 tweet.text = tweet.text.replace(url.url, "")
     return tweet
@@ -193,7 +194,7 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
             cst = timezone(timedelta(hours=8))
             tweet_time = tweet.created_at.astimezone(cst).replace(microsecond=0)
             text = f"时间：{tweet_time.year}年{tweet_time.month}月{tweet_time.day}日 {tweet_time.time()}\n" \
-                   f"标题：【推特更新】\n" \
+                   f"【推特更新】\n" \
                    f"{user.name} @{user.username}:"
             text += tweet.text
             urls = []
@@ -206,7 +207,7 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
                     urls.append(url)
             po = ParsedObject(text=text, images_url=urls, timestamp=str(int(tweet_time.timestamp())))
             msgs.append(po)
-            logger.debug(f"处理过的的推文{po}")
+            logger.debug(f"处理过的的推文：{po}")
 
     return t.meta.newest_id, msgs
 
@@ -217,9 +218,10 @@ async def check_tweet_update() -> List[ParsedObject]:
         for keyword in plugin_config.tweet_moni_keywords:
             tweet_json = await _download_latest_tweet(topic_keyword=keyword, update=True)
             _newest_twi_id, _tweets = await parse_tweet(tweet_json)
-            global newest_twi_id
+            global newest_twi_id, _last_newest_twi_id
             if _newest_twi_id > newest_twi_id:
-                logger.warning(f"发现推特更新，匹配关键词{keyword}")
+                logger.warning(f"发现推特更新，匹配关键词<{keyword}>")
+                _last_newest_twi_id = newest_twi_id
                 newest_twi_id = _newest_twi_id
             tweets += _tweets
 
@@ -235,8 +237,9 @@ async def get_tweets_f() -> List[ParsedObject]:
         for keyword in plugin_config.tweet_moni_keywords:
             tweet_json = await _download_latest_tweet(topic_keyword=keyword, update=False)
             _newest_twi_id, _tweets = await parse_tweet(tweet_json)
-            global newest_twi_id
+            global newest_twi_id, _last_newest_twi_id
             if _newest_twi_id > newest_twi_id:
+                _last_newest_twi_id = newest_twi_id
                 newest_twi_id = _newest_twi_id
             tweets += _tweets
 
@@ -248,3 +251,13 @@ async def get_tweets_f() -> List[ParsedObject]:
 
 async def tweet_initial():
     await get_tweets_f()
+
+
+async def restore_tweet_id():
+    """
+    将newest_twi_id恢复到上一次的值。
+
+    用于推特中的图片在PO转Message阶段下载失败时，判定本次获取推特更新失败。
+    """
+    global newest_twi_id, _last_newest_twi_id
+    newest_twi_id = _last_newest_twi_id

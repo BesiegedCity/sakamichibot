@@ -37,4 +37,4 @@ async def get_advanced(url: str, params=None, headers=None, proxies=None) -> Uni
                 logger.exception("网络错误")
         else:
             logger.error("所有Get尝试均失败，返回None")
-            raise ValueError("下载到的内容为空")
+            return None

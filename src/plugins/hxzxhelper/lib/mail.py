@@ -20,7 +20,8 @@ from ..model import ParsedObject
 global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
 
-lastmailtime = ""
+newest_mail_time = ""
+_last_mail_time = ""
 EMAIL_ADDR = plugin_config.mail_recv_addr
 PASSWORD = plugin_config.mail_recv_pwd.get_secret_value()
 POP3_SERVER = plugin_config.pop3_server
@@ -100,7 +101,7 @@ async def download_mail_images(imgs_url: List[str]) -> Tuple[bytes, ...]:
 
 @run_sync
 def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
-    global lastmailtime
+    global newest_mail_time
     # 连接到POP3服务器:
     server = poplib.POP3_SSL(POP3_SERVER)
     server.user(EMAIL_ADDR)
@@ -119,17 +120,17 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
         addr, subj, tim, timstp = parse_mail_header(msg)
         if not _latest_mail_time:
             _latest_mail_time = timstp
-        if not lastmailtime:  # 仅用于初始化
-            lastmailtime = _latest_mail_time
+        if not newest_mail_time:  # 仅用于初始化
+            newest_mail_time = _latest_mail_time
             return "", []
-        if timstp > lastmailtime and addr in MONI_ADDRS:
+        if timstp > newest_mail_time and addr in MONI_ADDRS:
             rawcontent = parse_mail_raw_content(msg)
             po = parse_mail_content(rawcontent)
             po.text = f"{tim}\n{subj}\n" + po.text
             po.timestamp = timstp
             new_mails.append(po)
         else:
-            if timstp <= lastmailtime:
+            if timstp <= newest_mail_time:
                 break
         index = index - 1
     server.quit()
@@ -137,13 +138,24 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
 
 
 async def check_mail_update() -> List[ParsedObject]:
-    global lastmailtime
+    global newest_mail_time, _last_mail_time
     timstp, mails = await get_latest_mail()
     if mails:
         logger.warning(f"发现{len(mails)}篇mail更新")
-        lastmailtime = timstp
+        _last_mail_time = newest_mail_time
+        newest_mail_time = timstp
         return mails
 
 
 async def mail_initial():
     await get_latest_mail()
+
+
+async def restore_mail_time():
+    """
+    将lastmailtime恢复到上一次的值。
+
+    用于mail中的图片在PO转Message阶段下载失败时，判定本次获取mail更新失败。
+    """
+    global newest_mail_time, _last_mail_time
+    newest_mail_time = _last_mail_time

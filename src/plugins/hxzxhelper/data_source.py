@@ -3,11 +3,12 @@ from typing import List, Union
 
 import nonebot
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
+from nonebot.log import logger
 
 from .config import Config
 from .lib.blog import check_blog_update, get_blog_f, blog_initial
-from .lib.mail import check_mail_update, mail_initial
-from .lib.twitter import check_tweet_update, get_tweets_f, tweet_initial
+from .lib.mail import check_mail_update, mail_initial, restore_mail_time
+from .lib.twitter import check_tweet_update, get_tweets_f, tweet_initial, restore_tweet_id
 from .lib.utils import get_advanced
 from .model import ParsedObject, Mail
 
@@ -47,6 +48,11 @@ async def parse_po2mail(po: ParsedObject, mail_type: str) -> Mail:
         img_tasks = [_download_image(url) for url in po.images_url]
         imgs = await asyncio.gather(*img_tasks)
         if None in imgs:
+            logger.error("没有完整地下载到图片")
+            if mail_type == "tweet":
+                await restore_tweet_id()
+            if mail_type == "mail":
+                await restore_mail_time()
             raise ValueError("没有完整地下载到图片")
 
     m = Mail()
