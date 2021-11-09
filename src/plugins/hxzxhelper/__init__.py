@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import re
+import time
 from io import BytesIO
 from typing import List, Optional, Dict
 
@@ -303,8 +304,7 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     if mails_dict[targetmail].type == "tweet":
         raw_msg = re.sub("时间.*", "", raw_msg)
         raw_msg = re.sub("【推特更新】", "", raw_msg)
-        raw_msg = re.sub(r"^\s*|\s*$", "", raw_msg)
-    raw_msg = raw_msg.strip("\n")
+    raw_msg = re.sub(r"^\s*|\s*$", "", raw_msg)
     if mails_dict[targetmail].translation != "":
         logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
         await load_trans.send(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
@@ -430,8 +430,11 @@ if plugin_config.mail:
             logger.info(f"没有检查到Mail更新")
 
 
-    @scheduler.scheduled_job('cron', id='clean_mail', hour="3")
-    async def cleanmaildict():
-        global mails_dict
-        mails_dict = {}
-        logger.warning("过去一天中尚未发送的mail和tweet已经清除")
+@scheduler.scheduled_job('cron', id='clean_mail', hour="3")
+async def cleanmaildict():
+    global mails_dict
+    now = int(time.time())
+    for timestamp in mails_dict.copy().keys():
+        if now - int(timestamp) > 3 * 24 * 60 * 60:
+            mails_dict.pop(timestamp)
+    logger.warning("列表中超过三天尚未发送的mail和tweet已经清除")

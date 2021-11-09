@@ -1,3 +1,4 @@
+import asyncio
 from typing import Union
 
 import httpx
@@ -35,6 +36,7 @@ async def get_advanced(url: str, params=None, headers=None, proxies=None) -> Uni
                 logger.warning("代理服务器出错")
             except httpx.RequestError:
                 logger.exception("网络错误")
+            await asyncio.sleep(0.3)
         else:
             logger.error("所有Get尝试均失败，返回None")
             return None

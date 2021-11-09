@@ -194,7 +194,7 @@ async def parse_tweet(t: TweetAPI) -> Tuple[str, List[ParsedObject]]:
             cst = timezone(timedelta(hours=8))
             tweet_time = tweet.created_at.astimezone(cst).replace(microsecond=0)
             text = f"时间：{tweet_time.year}年{tweet_time.month}月{tweet_time.day}日 {tweet_time.time()}\n" \
-                   f"【推特更新】\n" \
+                   f"【推特更新】\n\n" \
                    f"{user.name} @{user.username}:"
             text += tweet.text
             urls = []
