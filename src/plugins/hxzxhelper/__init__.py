@@ -155,7 +155,6 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
     retry = 6
     bot = nonebot.get_bot(str(event.self_id))
     rsps = {}
-    mailindex = mail.time
     logger.info(f"正在发送b站动态，序号：{mail.no}，文字内容：{repr(mail.translation)}")
     try:
         sendrsps = await dynamic.send_dynamic(f"{plugin_config.dynamic_topic}\n" + mail.translation,
@@ -170,12 +169,15 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
                 if "desc" in rsps:
                     if "acl" in rsps["desc"]:
                         if rsps["desc"]["acl"] != 0:
-                            await bot.send(event, f"mail[{mail.no}]：发送成功（进入审核队列）")
+                            await bot.send(event, f"{mail.no}：b站已发（正在审核）")
+                            logger.info(f"{mail.no}：发送成功（进入审核队列）")
                         else:
-                            await bot.send(event, f"mail[{mail.no}]：发送成功（b站已发）")
+                            await bot.send(event, f"{mail.no}：b站已发")
+                            logger.info(f"{mail.no}：发送成功（b站已发）")
                     else:
-                        await bot.send(event, f"mail[{mail.no}]：发送成功（b站已发）")
-                mails_dict.pop(mailindex)
+                        await bot.send(event, f"{mail.no}：b站已发")
+                        logger.info(f"{mail.no}：发送成功（b站已发）")
+                mails_dict[mail.time].stat = 4
                 return
             except ServerDisconnectedError as errmsg:
                 retry = retry - 1
@@ -184,9 +186,9 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
                 continue
         else:
             logger.error("五次重试均失败，放弃状态检查")
-            await bot.send(event, f"mail[{mail.no}]：发送完毕（状态未知）")
+            await bot.send(event, f"{mail.no}：发送完毕（状态未知）")
     except ResponseCodeException as errmsg:
-        await bot.send(event, f"mail[{mail.no}]：发送失败，{errmsg}")
+        await bot.send(event, f"{mail.no}：发送失败，{errmsg}")
 
 
 @show_tasks.handle()
@@ -207,19 +209,19 @@ async def canceltask(bot: Bot, event: GroupMessageEvent):
         try:
             for mail in mails_dict.copy().values():
                 if mail.no == int(arg):
-                    mails_dict.pop(mail.time)
                     found = True
                     break
             if not found:
                 raise IndexError
+            mails_dict[mail.time].stat = 5
             scheduler.remove_job(arg)
-            await cancel_task.finish(f"mail[{arg}]：已取消发送")
+            await cancel_task.finish(f"{arg}：已取消")
         except IndexError:
-            await cancel_task.finish("没有在处理和发送队列中找到对应mail")
+            await cancel_task.finish("没有在处理和发送队列中找到对应内容")
         except apscheduler.jobstores.base.JobLookupError:
-            await cancel_task.finish(f"mail[{arg}]：尚未进入发送队列，已从处理队列中移出")
+            await cancel_task.finish(f"编号{arg}还没发，标记为已取消")
     else:
-        await cancel_task.finish("请提供取消发送的mail数字序号")
+        await cancel_task.finish("请提供需要取消发送的内容数字编号")
 
 
 @load_img.handle()
@@ -306,8 +308,9 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
         raw_msg = re.sub("【推特更新】", "", raw_msg)
     raw_msg = re.sub(r"^\s*|\s*$", "", raw_msg)
     if mails_dict[targetmail].translation != "":
-        logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
-        await load_trans.send(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
+        if mails_dict[targetmail].stat != 4 and mails_dict[targetmail].stat != 5:
+            logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
+            await load_trans.send(f"{mails_dict[targetmail].no}：替换为新的翻译")
     mails_dict[targetmail].translation = raw_msg
     logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已收集")
     # await load_trans.send(f"mail[{targetmail}]：翻译已收集")
@@ -322,6 +325,10 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
                                  run_date=datetime.datetime.now() + datetime.timedelta(minutes=TIME_WAITBEFORESEND),
                                  )
         await load_trans.finish(mails_dict[targetmail].preview())
+    elif mails_dict[targetmail].stat == 4:
+        await load_trans.finish("这条之前发过，我就不重发了")
+    elif mails_dict[targetmail].stat == 5:
+        await load_trans.finish("这条被取消过，交给人工来发吧")
     else:
         mails_dict[targetmail].stat = 2
 
@@ -437,4 +444,4 @@ async def cleanmaildict():
     for timestamp in mails_dict.copy().keys():
         if now - int(timestamp) > 3 * 24 * 60 * 60:
             mails_dict.pop(timestamp)
-    logger.warning("列表中超过三天尚未发送的mail和tweet已经清除")
+    logger.warning("列表中超过三天的mail和tweet已经清除")

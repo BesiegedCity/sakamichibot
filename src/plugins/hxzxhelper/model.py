@@ -65,7 +65,7 @@ class Mail(object):
         self.images = []
         self.translation = ""
         self.time = ""
-        self.stat = 0  # 0: 初始状态/非mail内容 1：图片载入完成，等待翻译 2：翻译载入完成，等待图片 3：等待发送
+        self.stat = 0  # 0: 初始状态/非mail内容 1：图片载入完成，等待翻译 2：翻译载入完成，等待图片 3：等待发送 4：已发送 5：已取消
         self.type = ""  # "tweet" "mail"
 
         mailcnt += 1
@@ -79,6 +79,10 @@ class Mail(object):
             return "翻译收集完成，等待图片"
         if self.stat == 3:
             return "准备完毕，等待发送"
+        if self.stat == 4:
+            return "已发送"
+        if self.stat == 5:
+            return "已取消"
 
     def message(self):
         msg = MessageSegment.text(self.translation)
