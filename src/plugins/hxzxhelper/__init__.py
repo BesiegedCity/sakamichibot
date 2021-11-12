@@ -169,13 +169,13 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
                 if "desc" in rsps:
                     if "acl" in rsps["desc"]:
                         if rsps["desc"]["acl"] != 0:
-                            await bot.send(event, f"{mail.no}：b站已发（正在审核）")
+                            await bot.send(event, f"编号{mail.no}：b站已发（正在审核）")
                             logger.info(f"{mail.no}：发送成功（进入审核队列）")
                         else:
-                            await bot.send(event, f"{mail.no}：b站已发")
+                            await bot.send(event, f"编号{mail.no}：b站已发")
                             logger.info(f"{mail.no}：发送成功（b站已发）")
                     else:
-                        await bot.send(event, f"{mail.no}：b站已发")
+                        await bot.send(event, f"编号{mail.no}：b站已发")
                         logger.info(f"{mail.no}：发送成功（b站已发）")
                 mails_dict[mail.time].stat = 4
                 return
@@ -186,9 +186,9 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
                 continue
         else:
             logger.error("五次重试均失败，放弃状态检查")
-            await bot.send(event, f"{mail.no}：发送完毕（状态未知）")
+            await bot.send(event, f"编号{mail.no}：发送完毕（状态未知）")
     except ResponseCodeException as errmsg:
-        await bot.send(event, f"{mail.no}：发送失败，{errmsg}")
+        await bot.send(event, f"编号{mail.no}：发送失败，{errmsg}")
 
 
 @show_tasks.handle()
@@ -210,12 +210,12 @@ async def canceltask(bot: Bot, event: GroupMessageEvent):
             for mail in mails_dict.copy().values():
                 if mail.no == int(arg):
                     found = True
+                    mails_dict[mail.time].stat = 5
                     break
             if not found:
                 raise IndexError
-            mails_dict[mail.time].stat = 5
             scheduler.remove_job(arg)
-            await cancel_task.finish(f"{arg}：已取消")
+            await cancel_task.finish(f"编号{arg}：已取消")
         except IndexError:
             await cancel_task.finish("没有在处理和发送队列中找到对应内容")
         except apscheduler.jobstores.base.JobLookupError:
@@ -310,7 +310,7 @@ async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     if mails_dict[targetmail].translation != "":
         if mails_dict[targetmail].stat != 4 and mails_dict[targetmail].stat != 5:
             logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已覆盖")
-            await load_trans.send(f"{mails_dict[targetmail].no}：替换为新的翻译")
+            await load_trans.send(f"编号{mails_dict[targetmail].no}：已替换为新的翻译")
     mails_dict[targetmail].translation = raw_msg
     logger.info(f"mail[{mails_dict[targetmail].no}]：翻译已收集")
     # await load_trans.send(f"mail[{targetmail}]：翻译已收集")
