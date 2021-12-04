@@ -113,7 +113,11 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
     _latest_mail_time = ""
     while index:
         logger.debug(f"正在检查第{len(mails) - index + 1}封邮件")
-        _, lines, _ = server.retr(index)  # 获取最新邮件
+        try:
+            _, lines, _ = server.retr(index)  # 获取最新邮件
+            server.noop()   # 无实际作用。用于触发部分邮件retr时服务器在末尾返回两次".\r\n"的错误
+        except poplib.error_proto:  # 应对未知原因的错误：poplib.error_proto:b '.'
+            pass
         msg_content = b'\r\n'.join(lines)
         parser = BytesParser()
         msg = parser.parsebytes(msg_content)
@@ -122,6 +126,7 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
             _latest_mail_time = timstp
         if not newest_mail_time:  # 仅用于初始化
             newest_mail_time = _latest_mail_time
+            server.quit()
             return "", []
         if timstp > newest_mail_time and addr in MONI_ADDRS:
             rawcontent = parse_mail_raw_content(msg)
