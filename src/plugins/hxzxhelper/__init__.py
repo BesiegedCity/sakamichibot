@@ -371,7 +371,7 @@ if plugin_config.blog:
                         await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=f"第{cnt}张图片" + img)
             await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message="我的博客更新啦ヾ(≧▽≦*)o，快来翻译")
         else:
-            logger.info(f"没有检查到博客更新")
+            logger.debug(f"没有检查到博客更新")
 
 if plugin_config.tweet:
     get_twi = on_command("最新推文", priority=5)
@@ -412,8 +412,10 @@ if plugin_config.tweet:
                         for image in mail.images:
                             t += MessageSegment.image(image)
                     await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=t)
+                else:
+                    logger.info("新Tweet已在列表中，跳过")
         else:
-            logger.info(f"没有检查到推特更新")
+            logger.debug(f"没有检查到推特更新")
 
 if plugin_config.mail:
     @scheduler.scheduled_job('cron', id='update_mail', hour="7-23", minute=f"*/{TIME_CHECKMAILUPDATE}")
@@ -423,7 +425,7 @@ if plugin_config.mail:
         if _new_mails:
             for new_mail in _new_mails:
                 if new_mail.time in mails_dict:
-                    logger.info("新mail已在列表中，跳过")
+                    logger.info("新Mail已在列表中，跳过")
                     continue
                 mails_dict[new_mail.time] = new_mail
                 bot = nonebot.get_bot()
@@ -434,7 +436,7 @@ if plugin_config.mail:
                         await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
                                                  message=MessageSegment.image(image))
         else:
-            logger.info(f"没有检查到Mail更新")
+            logger.debug(f"没有检查到Mail更新")
 
 
 @scheduler.scheduled_job('cron', id='clean_mail', hour="3")
