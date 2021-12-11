@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Union
+from typing import Tuple, List, Union
 
 import nonebot
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
@@ -7,7 +7,7 @@ from nonebot.log import logger
 
 from .config import Config
 from .lib.blog import check_blog_update, get_blog_f, blog_initial
-from .lib.mail import check_mail_update, mail_initial, restore_mail_time
+from .lib.mail import check_mail_update, mail_initial, restore_mail_time, get_mail_list, restore_mail_time_manually
 from .lib.twitter import check_tweet_update, get_tweets_f, tweet_initial, restore_tweet_id
 from .lib.utils import get_advanced
 from .model import ParsedObject, Mail

@@ -21,9 +21,9 @@ from nonebot.typing import T_State
 
 from .config import Config
 from .data_source import blog_initial, get_blog_update, get_blog_manually
-from .data_source import mail_initial, get_mail_update
+from .data_source import mail_initial, get_mail_update, get_mail_list, restore_mail_time_manually
 from .data_source import tweet_initial, get_tweet_update, get_tweet_manually
-from .model import Mail
+from .model import Mail, ParsedObject
 
 global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
@@ -437,6 +437,40 @@ if plugin_config.mail:
                                                  message=MessageSegment.image(image))
         else:
             logger.debug(f"没有检查到Mail更新")
+    
+
+    restore_mail = on_command("恢复邮件", rule=checkifmaster, priority=4)
+
+
+    @restore_mail.handle()
+    async def restmail_step1(bot: Bot, event: GroupMessageEvent, state: T_State):
+        tempid = await restore_mail.send("正在查询列表...")
+        po = await get_mail_list()
+        await bot.delete_msg(**tempid)
+        msg = "请回复需要获取的最后一篇Mail的序号（以下按时间先后排序）：\n"
+        if po:
+            i = 0
+            state["list_len"] = len(po)
+            state["timestamps"] = []
+            for item in po:
+                i = i + 1
+                if i > 5:
+                    break
+                msg += f'\n{i}. {item.text.replace("标题：", "")}'
+                state["timestamps"].append(item.timestamp)
+            await restore_mail.pause(msg)
+        else:
+            await restore_mail.finish("邮箱中没有Mail")
+    
+
+    @restore_mail.handle()
+    async def restmail_step2(bot: Bot, event: GroupMessageEvent, state: T_State):
+        ans = str(event.get_message()).strip(" ")
+        if ans in [str(i) for i in range(1, min(5, state["list_len"]))]:
+            await restore_mail_time_manually(state["timestamps"][int(ans)])
+            await restore_mail.finish("已恢复，下次推送时生效")
+        else:
+            await restore_mail.finish("回复的序号超出可指定范围")
 
 
 @scheduler.scheduled_job('cron', id='clean_mail', hour="3")

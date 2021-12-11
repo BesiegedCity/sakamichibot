@@ -8,6 +8,7 @@ from email.utils import parseaddr
 from typing import Tuple, List
 
 import nonebot
+import dateutil
 from dateutil import parser as parse_date
 from lxml import etree
 from nonebot.log import logger
@@ -121,7 +122,10 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
         msg_content = b'\r\n'.join(lines)
         parser = BytesParser()
         msg = parser.parsebytes(msg_content)
-        addr, subj, tim, timstp = parse_mail_header(msg)
+        try:
+            addr, subj, tim, timstp = parse_mail_header(msg)
+        except dateutil.parser._parser.ParserError:
+            continue
         if not _latest_mail_time:
             _latest_mail_time = timstp
         if not newest_mail_time:  # 仅用于初始化
@@ -164,3 +168,54 @@ async def restore_mail_time():
     """
     global newest_mail_time, _last_mail_time
     newest_mail_time = _last_mail_time
+
+
+@run_sync
+def get_mail_list() -> List[ParsedObject]:
+    """
+    用于获取当前邮箱最近 5 篇Mail，返回Mail编号、时间和标题
+    """
+    global newest_mail_time
+    # 连接到POP3服务器:
+    server = poplib.POP3_SSL(POP3_SERVER)
+    server.user(EMAIL_ADDR)
+    server.pass_(PASSWORD)
+
+    _, mails, _ = server.list()
+    index = len(mails)
+    mails_list = []
+    mail_cnt = 5 + 1
+
+    while index and mail_cnt:
+        try:
+            _, lines, _ = server.retr(index)  # 获取最新邮件
+            server.noop()   # 无实际作用。用于触发部分邮件retr时服务器在末尾返回两次".\r\n"的错误
+        except poplib.error_proto:  # 应对未知原因的错误：poplib.error_proto:b '.'
+            logger.warning("触发未知错误，已经捕获")
+            pass
+        logger.debug(f"正在检查第{len(mails) - index + 1}封邮件")
+        msg_content = b'\r\n'.join(lines)
+        parser = BytesParser()
+        msg = parser.parsebytes(msg_content)
+        try:
+            addr, subj, tim, timstp = parse_mail_header(msg)
+        except dateutil.parser._parser.ParserError:
+            continue
+
+        if addr in MONI_ADDRS:
+            rawcontent = parse_mail_raw_content(msg)
+            po = parse_mail_content(rawcontent)
+            po.text = subj
+            po.timestamp = timstp
+            mails_list.append(po)
+            mail_cnt = mail_cnt - 1
+        index = index - 1
+    server.quit()
+    return mails_list
+
+async def restore_mail_time_manually(timstp: int):
+    """
+    将最新Mail时间恢复到指定的时间，以获取指定时间之后的Mail
+    """
+    global newest_mail_time
+    newest_mail_time = timstp
