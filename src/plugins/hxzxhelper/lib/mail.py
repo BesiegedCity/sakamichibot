@@ -83,6 +83,8 @@ def parse_mail_content(raw_content: str) -> ParsedObject:
     for text in body.iter():
         if text.text:
             content_str += text.text + "\n"
+        if text.tail:
+            content_str += text.tail + "\n"
         if text.tag == "br":
             content_str += "\n"
         if text.tag == "img":
@@ -205,7 +207,7 @@ def get_mail_list() -> List[ParsedObject]:
         if addr in MONI_ADDRS:
             rawcontent = parse_mail_raw_content(msg)
             po = parse_mail_content(rawcontent)
-            po.text = subj
+            po.text = f"{tim}\n{subj}"
             po.timestamp = timstp
             mails_list.append(po)
             mail_cnt = mail_cnt - 1

@@ -286,6 +286,7 @@ async def loadmail(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     targetmail = -1
     raw_msg = str(event.get_message())
+    raw_msg = re.sub("\[CQ:image.*\]", "", raw_msg)
     logger.info("收集到的翻译:" + repr(raw_msg))
     if raw_msg.find("\r\n") == -1:
         firstlineend = raw_msg.find("\n")
@@ -430,11 +431,16 @@ if plugin_config.mail:
                 mails_dict[new_mail.time] = new_mail
                 bot = nonebot.get_bot()
 
-                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+                # await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+                # if new_mail.images:
+                #     for image in new_mail.images:
+                #         await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
+                #                                  message=MessageSegment.image(image))
+                msg = MessageSegment.text(new_mail.raw_text)
                 if new_mail.images:
                     for image in new_mail.images:
-                        await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
-                                                 message=MessageSegment.image(image))
+                        msg += MessageSegment.image(image)
+                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=msg)
         else:
             logger.debug(f"没有检查到Mail更新")
     
@@ -456,7 +462,7 @@ if plugin_config.mail:
                 i = i + 1
                 if i > 5:
                     break
-                msg += f'\n{i}. {item.text.replace("标题：", "")}'
+                msg += f'\n{i}.\n{item.text}'
                 state["timestamps"].append(item.timestamp)
             await restore_mail.pause(msg)
         else:
@@ -468,6 +474,11 @@ if plugin_config.mail:
         ans = str(event.get_message()).strip(" ")
         if ans in [str(i) for i in range(1, min(5, state["list_len"]))]:
             await restore_mail_time_manually(state["timestamps"][int(ans)])
+            global mails_dict
+            for timestp in state["timestamps"]:
+                if timestp in mails_dict:
+                    mails_dict.pop(timestp)
+            
             await restore_mail.finish("已恢复，下次推送时生效")
         else:
             await restore_mail.finish("回复的序号超出可指定范围")
