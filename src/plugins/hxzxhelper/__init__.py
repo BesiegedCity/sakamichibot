@@ -21,9 +21,9 @@ from nonebot.typing import T_State
 
 from .config import Config
 from .data_source import blog_initial, get_blog_update, get_blog_manually
-from .data_source import mail_initial, get_mail_update
+from .data_source import mail_initial, get_mail_update, get_mail_list, restore_mail_time_manually
 from .data_source import tweet_initial, get_tweet_update, get_tweet_manually
-from .model import Mail
+from .model import Mail, ParsedObject
 
 global_config = nonebot.get_driver().config
 plugin_config = Config(**global_config.dict())
@@ -286,6 +286,7 @@ async def loadmail(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def loadtrans(bot: Bot, event: GroupMessageEvent, state: T_State):
     targetmail = -1
     raw_msg = str(event.get_message())
+    raw_msg = re.sub("\[CQ:image.*\]", "", raw_msg)
     logger.info("收集到的翻译:" + repr(raw_msg))
     if raw_msg.find("\r\n") == -1:
         firstlineend = raw_msg.find("\n")
@@ -430,13 +431,57 @@ if plugin_config.mail:
                 mails_dict[new_mail.time] = new_mail
                 bot = nonebot.get_bot()
 
-                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+                # await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=new_mail.raw_text)
+                # if new_mail.images:
+                #     for image in new_mail.images:
+                #         await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
+                #                                  message=MessageSegment.image(image))
+                msg = MessageSegment.text(new_mail.raw_text)
                 if new_mail.images:
                     for image in new_mail.images:
-                        await bot.send_group_msg(group_id=ADMINGROUPS[push_group],
-                                                 message=MessageSegment.image(image))
+                        msg += MessageSegment.image(image)
+                await bot.send_group_msg(group_id=ADMINGROUPS[push_group], message=msg)
         else:
             logger.debug(f"没有检查到Mail更新")
+    
+
+    restore_mail = on_command("恢复邮件", rule=checkifmaster, priority=4)
+
+
+    @restore_mail.handle()
+    async def restmail_step1(bot: Bot, event: GroupMessageEvent, state: T_State):
+        tempid = await restore_mail.send("正在查询列表...")
+        po = await get_mail_list()
+        await bot.delete_msg(**tempid)
+        msg = "请回复需要获取的最后一篇Mail的序号（以下按时间先后排序）：\n"
+        if po:
+            i = 0
+            state["list_len"] = len(po)
+            state["timestamps"] = []
+            for item in po:
+                i = i + 1
+                if i > 5:
+                    break
+                msg += f'\n{i}.\n{item.text}'
+                state["timestamps"].append(item.timestamp)
+            await restore_mail.pause(msg)
+        else:
+            await restore_mail.finish("邮箱中没有Mail")
+    
+
+    @restore_mail.handle()
+    async def restmail_step2(bot: Bot, event: GroupMessageEvent, state: T_State):
+        ans = str(event.get_message()).strip(" ")
+        if ans in [str(i) for i in range(1, min(5, state["list_len"]))]:
+            await restore_mail_time_manually(state["timestamps"][int(ans)])
+            global mails_dict
+            for timestp in state["timestamps"]:
+                if timestp in mails_dict:
+                    mails_dict.pop(timestp)
+            
+            await restore_mail.finish("已恢复，下次推送时生效")
+        else:
+            await restore_mail.finish("回复的序号超出可指定范围")
 
 
 @scheduler.scheduled_job('cron', id='clean_mail', hour="3")
