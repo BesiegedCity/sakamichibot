@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import poplib
+import re
 from email.header import decode_header
 from email.message import Message
 from email.parser import BytesParser
@@ -76,6 +77,7 @@ def parse_mail_header(mail: Message):
 
 
 def parse_mail_content(raw_content: str) -> ParsedObject:
+    logger.debug(f"原始Mail网页数据：{raw_content}")
     root = etree.HTML(raw_content)
     body = root[1]
     content_str = ""
@@ -88,10 +90,11 @@ def parse_mail_content(raw_content: str) -> ParsedObject:
         if text.tag == "br":
             content_str += "\n"
         if text.tag == "img":
-            images_url.append(text.get("src"))
-
-    return ParsedObject(text=content_str, images_url=images_url)
-
+            if "cuenote" not in text.get("src"):
+                images_url.append(text.get("src"))
+    content_str = re.sub(r"^\s*|\s*$", "", content_str)
+    return ParsedObject(text="\n"+content_str, images_url=images_url)
+    
 
 async def download_mail_images(imgs_url: List[str]) -> Tuple[bytes, ...]:
     if imgs_url:
