@@ -12,10 +12,10 @@ nonebot-adapter-cqhttp = "^2.0.0-alpha.16"
 nonebot-plugin-apscheduler = "^0.1.2"
 mysql-connector-python = "^8.0.26"
 zhconv = "^1.4.2"
-bilibili-api = "^8.3.1"
-pillow = "^8.4"
 pydantic = {extras = ["email"], version = "^1.8"}
 emoji = "^1.6.1"
+bilibili-api-python = "^14.2.0"
+pillow = "^9.4.0"
 
 [tool.poetry.dev-dependencies]
 

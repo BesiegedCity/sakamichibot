@@ -10,6 +10,7 @@ import nonebot
 from PIL import Image
 from aiohttp.client_exceptions import ServerDisconnectedError
 from bilibili_api import dynamic
+from bilibili_api.utils.Picture import Picture
 from bilibili_api.exceptions import ResponseCodeException
 from httpx import AsyncClient
 from nonebot import on_command, on_startswith, on_message, get_driver
@@ -156,9 +157,15 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
     bot = nonebot.get_bot(str(event.self_id))
     rsps = {}
     logger.info(f"正在发送b站动态，序号：{mail.no}，文字内容：{repr(mail.translation)}")
+
+    # 适配新的bilibili-api-python接口
+    pictures = []
+    for image in mail.images:
+        pictures.append(Picture().from_content(image, 'jpg'))
+
     try:
         sendrsps = await dynamic.send_dynamic(f"{plugin_config.dynamic_topic}\n" + mail.translation,
-                                              image_streams=mail.images,
+                                              images=pictures,
                                               credential=cred)
         while retry:
             try:

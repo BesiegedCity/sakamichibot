@@ -31,7 +31,7 @@ class Config(BaseSettings):
     time_waitbeforesend: int = 10
     time_waitforimages: int = 2
     dynamic_topic: str = "#贺喜遥香#"
-    bili_cred: Union[Credential, Dict[str, str]] = {"sessdata": "", "bili_jct": "", "buvid3": ""}
+    bili_cred: Union[Credential, Dict[str, str]] = {"sessdata": "", "bili_jct": "", "buvid3": "", "dedeuserid": ""}
 
     # 官方推特推送功能（部分字段请参考Twitter API）
     tweet: bool = False
