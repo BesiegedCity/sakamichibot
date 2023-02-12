@@ -130,6 +130,7 @@ def get_latest_mail() -> Tuple[str, List[ParsedObject]]:
         try:
             addr, subj, tim, timstp = parse_mail_header(msg)
         except dateutil.parser._parser.ParserError:
+            index = index - 1
             continue
         if not _latest_mail_time:
             _latest_mail_time = timstp
@@ -205,6 +206,7 @@ def get_mail_list() -> List[ParsedObject]:
         try:
             addr, subj, tim, timstp = parse_mail_header(msg)
         except dateutil.parser._parser.ParserError:
+            index = index - 1
             continue
 
         if addr in MONI_ADDRS:
