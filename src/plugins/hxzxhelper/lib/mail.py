@@ -90,7 +90,7 @@ def parse_mail_content(raw_content: str) -> ParsedObject:
         if text.tag == "br":
             content_str += "\n"
         if text.tag == "img":
-            if "cuenote" not in text.get("src"):
+            if "nogizaka46" not in text.get("src"):
                 images_url.append(text.get("src"))
     content_str = re.sub(r"^\s*|\s*$", "", content_str)
     return ParsedObject(text="\n"+content_str, images_url=images_url)
