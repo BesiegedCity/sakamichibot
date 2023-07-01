@@ -10,7 +10,8 @@ import nonebot
 from PIL import Image
 from aiohttp.client_exceptions import ServerDisconnectedError
 from bilibili_api import dynamic
-from bilibili_api.utils.Picture import Picture
+from bilibili_api.dynamic import BuildDynmaic
+from bilibili_api.utils.picture import Picture
 from bilibili_api.exceptions import ResponseCodeException
 from httpx import AsyncClient
 from nonebot import on_command, on_startswith, on_message, get_driver
@@ -161,29 +162,23 @@ async def send2bili(mail: Mail, event: GroupMessageEvent):
     # 适配新的bilibili-api-python接口
     pictures = []
     for image in mail.images:
-        pictures.append(Picture().from_content(image, 'jpg'))
-
+        pictures.append(await Picture.from_content(image, 'jpg').upload_file(cred))
+    logger.info(f"图片上传b站完成，共{len(pictures)}张图片")
     try:
-        sendrsps = await dynamic.send_dynamic(f"{plugin_config.dynamic_topic}\n" + mail.translation,
-                                              images=pictures,
+        dynTemp = BuildDynmaic()
+        dynTemp.add_image(pictures)
+        dynTemp.add_plain_text(f"{plugin_config.dynamic_topic}\n" + mail.translation)
+        sendrsps = await dynamic.send_dynamic(info=dynTemp,
                                               credential=cred)
         while retry:
             try:
                 await asyncio.sleep(5)  # 等待几秒后再检查审核状态
-                dy = dynamic.Dynamic(sendrsps["dynamic_id_str"], credential=cred)
+                print(sendrsps)
+                dy = dynamic.Dynamic(sendrsps["dyn_id"])
                 rsps = await dy.get_info()
                 logger.info(f"发送动态结果查询：{rsps}")
-                if "desc" in rsps:
-                    if "acl" in rsps["desc"]:
-                        if rsps["desc"]["acl"] != 0:
-                            await bot.send(event, f"编号{mail.no}：b站已发（正在审核）")
-                            logger.info(f"{mail.no}：发送成功（进入审核队列）")
-                        else:
-                            await bot.send(event, f"编号{mail.no}：b站已发")
-                            logger.info(f"{mail.no}：发送成功（b站已发）")
-                    else:
-                        await bot.send(event, f"编号{mail.no}：b站已发")
-                        logger.info(f"{mail.no}：发送成功（b站已发）")
+                await bot.send(event, f"编号{mail.no}：b站已发")
+                logger.info(f"{mail.no}：发送成功（b站已发）")
                 mails_dict[mail.time].stat = 4
                 return
             except ServerDisconnectedError as errmsg:
